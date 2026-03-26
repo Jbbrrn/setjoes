@@ -5,10 +5,12 @@ exports.getIngredients = async (req, res) => {
   try {
     const [rows] = await connection.query(
       `SELECT i.id, i.name, i.unit, i.cost_per_unit, i.servings_per_unit, i.supplier_name,
-              inv.quantity, inv.max_capacity, i.reorder_level,
+              COALESCE(inv.quantity, 0) AS quantity,
+              COALESCE(inv.max_capacity, 10000) AS max_capacity,
+              i.reorder_level,
               inv.last_restocked
        FROM ingredients i
-       JOIN ingredient_inventory inv ON inv.ingredient_id = i.id
+       LEFT JOIN ingredient_inventory inv ON inv.ingredient_id = i.id
        ORDER BY i.name ASC`
     );
     return res.json(rows);
@@ -25,9 +27,13 @@ exports.getFinishedGoods = async (req, res) => {
   const connection = await db.getConnection();
   try {
     const [rows] = await connection.query(
-      `SELECT p.id, p.name, p.base_price, inv.quantity, inv.reorder_level
+      `SELECT p.id,
+              p.name,
+              p.base_price,
+              COALESCE(inv.quantity, 0) AS quantity,
+              COALESCE(inv.reorder_level, 10) AS reorder_level
        FROM products p
-       JOIN inventory inv ON inv.product_id = p.id
+       LEFT JOIN inventory inv ON inv.product_id = p.id
        WHERE p.product_type = 'finished-goods'
        AND p.is_active = 1
        ORDER BY p.name ASC`
@@ -113,6 +119,12 @@ exports.adjustStock = async (req, res) => {
       );
     } else {
       const prodId = Number(product_id);
+      await connection.query(
+        `INSERT INTO inventory (product_id, quantity, reorder_level)
+         VALUES (?, 0, 10)
+         ON DUPLICATE KEY UPDATE product_id = product_id`,
+        [prodId]
+      );
       const [rows] = await connection.query('SELECT quantity FROM inventory WHERE product_id = ? FOR UPDATE', [prodId]);
       if (!rows.length) return res.status(404).json({ error: 'Finished-goods inventory not found' });
       const before = Number(rows[0].quantity);

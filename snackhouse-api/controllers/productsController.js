@@ -1,5 +1,14 @@
 const db = require('../config/database');
 
+const ensureFinishedGoodsInventory = async (connection, productId) => {
+  await connection.query(
+    `INSERT INTO inventory (product_id, quantity, reorder_level)
+     VALUES (?, 0, 10)
+     ON DUPLICATE KEY UPDATE product_id = product_id`,
+    [productId]
+  );
+};
+
 // Returns products plus a computed `current_stock` for the POS stock indicator.
 exports.getProducts = async (req, res) => {
   const connection = await db.getConnection();
@@ -128,6 +137,9 @@ exports.createProduct = async (req, res) => {
        VALUES (?, ?, ?, ?, 0, 1, ?)`,
       [name.trim(), Number(category_id), Number(base_price), product_type, image_url || null]
     );
+    if (product_type === 'finished-goods') {
+      await ensureFinishedGoodsInventory(connection, result.insertId);
+    }
     return res.status(201).json({ id: result.insertId });
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -181,6 +193,9 @@ exports.updateProduct = async (req, res) => {
       values
     );
     if (!result.affectedRows) return res.status(404).json({ error: 'Not found' });
+    if (product_type === 'finished-goods') {
+      await ensureFinishedGoodsInventory(connection, id);
+    }
     return res.json({ ok: true });
   } catch (err) {
     // eslint-disable-next-line no-console

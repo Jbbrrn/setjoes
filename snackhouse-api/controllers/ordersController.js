@@ -1,6 +1,7 @@
 const db = require('../config/database');
 
 const toMoney = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+class BadRequestError extends Error {}
 
 const validateOrderPayload = (body) => {
   const items = body && body.items;
@@ -109,13 +110,20 @@ exports.createOrder = async (req, res) => {
       );
 
       if (it.product_type === 'finished-goods') {
+        await connection.query(
+          `INSERT INTO inventory (product_id, quantity, reorder_level)
+           VALUES (?, 0, 10)
+           ON DUPLICATE KEY UPDATE product_id = product_id`,
+          [it.product_id]
+        );
+
         const [invRows] = await connection.query(
           'SELECT quantity FROM inventory WHERE product_id = ? FOR UPDATE',
           [it.product_id]
         );
-        if (!invRows.length) throw new Error(`No inventory record for product ${it.product_id}`);
+        if (!invRows.length) throw new BadRequestError(`No inventory record for product ${it.product_id}`);
         const before = Number(invRows[0].quantity);
-        if (before < it.quantity) throw new Error(`Insufficient stock for product ${it.product_id}`);
+        if (before < it.quantity) throw new BadRequestError(`Insufficient stock for product ${it.product_id}`);
         const after = before - it.quantity;
 
         await connection.query('UPDATE inventory SET quantity = ? WHERE product_id = ?', [after, it.product_id]);
@@ -150,9 +158,9 @@ exports.createOrder = async (req, res) => {
             'SELECT quantity FROM ingredient_inventory WHERE ingredient_id = ? FOR UPDATE',
             [ri.ingredient_id]
           );
-          if (!stockRows.length) throw new Error(`No ingredient inventory for ingredient ${ri.ingredient_id}`);
+          if (!stockRows.length) throw new BadRequestError(`No ingredient inventory for ingredient ${ri.ingredient_id}`);
           const before = Number(stockRows[0].quantity);
-          if (before < qtyToDeduct) throw new Error(`Insufficient ingredient stock for ingredient ${ri.ingredient_id}`);
+          if (before < qtyToDeduct) throw new BadRequestError(`Insufficient ingredient stock for ingredient ${ri.ingredient_id}`);
           const after = toMoney(before - qtyToDeduct);
 
           await connection.query(
@@ -194,6 +202,9 @@ exports.createOrder = async (req, res) => {
     });
   } catch (err) {
     await connection.rollback();
+    if (err instanceof BadRequestError) {
+      return res.status(400).json({ error: err.message });
+    }
     // eslint-disable-next-line no-console
     console.error('createOrder error:', err);
     return res.status(500).json({ error: 'An error occurred. Please try again.' });
