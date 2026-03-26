@@ -2,9 +2,18 @@ import React from 'react';
 import Button from '../common/Button';
 
 export default function ProductList({ products, onEdit, onDeactivate, onDelete, onRecipe }) {
+  const toIsActive = (value) => {
+    if (value === true || value === 1 || value === '1' || value === 'true') return true;
+    if (value === false || value === 0 || value === '0' || value === 'false' || value === null) return false;
+    // If backend omits the field, default to active so old payloads do not appear inactive.
+    return true;
+  };
+
   return (
     <div style={{ display: 'grid', gap: 12 }}>
-      {(products || []).map((p) => (
+      {(products || []).map((p) => {
+        const isActive = toIsActive(p.is_active);
+        return (
         <div
           key={p.id}
           style={{
@@ -26,8 +35,8 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
               ) : null}
               <div style={{ fontWeight: 900, fontSize: 18 }}>
                 {p.name}{' '}
-                <span style={{ fontSize: 12, fontWeight: 900, padding: '4px 8px', borderRadius: 999, background: p.is_active ? '#48BB78' : '#FC8181', color: 'white' }}>
-                  {p.is_active ? 'Active' : 'Inactive'}
+                <span style={{ fontSize: 12, fontWeight: 900, padding: '4px 8px', borderRadius: 999, background: isActive ? '#48BB78' : '#FC8181', color: 'white' }}>
+                  {isActive ? 'Active' : 'Inactive'}
                 </span>
               </div>
               <div style={{ opacity: 0.8, marginTop: 4 }}>
@@ -44,8 +53,8 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
               <Button className="btn-secondary" onClick={() => onEdit(p)}>
                 Edit
               </Button>
-              <Button className="btn-danger" onClick={() => onDeactivate(p)}>
-                {p.is_active ? 'Deactivate' : 'Activate'}
+              <Button className={isActive ? 'btn-danger' : 'btn-primary'} onClick={() => onDeactivate(p)}>
+                {isActive ? 'Set Inactive' : 'Set Active'}
               </Button>
               <Button className="btn-danger" onClick={() => onDelete(p)}>
                 Delete
@@ -53,7 +62,7 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
             </div>
           </div>
         </div>
-      ))}
+      )})}
     </div>
   );
 }

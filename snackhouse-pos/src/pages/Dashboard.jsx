@@ -4,34 +4,48 @@ import Button from '../components/common/Button';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import SummaryCards from '../components/dashboard/SummaryCards';
-import SalesChart from '../components/dashboard/SalesChart';
 import TopProducts from '../components/dashboard/TopProducts';
 import PaymentBreakdown from '../components/dashboard/PaymentBreakdown';
+import { formatPHP } from '../utils/formatters';
 
 export default function Dashboard() {
   const { employee, logout } = useAuth();
   const navigate = useNavigate();
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayLabel = useMemo(
+    () =>
+      new Intl.DateTimeFormat('en-PH', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        weekday: 'long'
+      }).format(new Date()),
+    []
+  );
   const [summary, setSummary] = useState(null);
   const [chartPoints, setChartPoints] = useState([]);
   const [topProducts, setTopProducts] = useState([]);
   const [paymentBreakdown, setPaymentBreakdown] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [range, setRange] = useState('daily');
 
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         setLoading(true);
+        const now = new Date();
+        const end = now.toISOString().slice(0, 10);
+        const start = new Date(now);
+        if (range === 'weekly') start.setDate(now.getDate() - 6);
+        else if (range === 'monthly') start.setDate(now.getDate() - 29);
+        const startDate = start.toISOString().slice(0, 10);
         const [s, c, t, p] = await Promise.all([
-          api.reports.getSummary(today),
-          api.reports.getSalesChart(
-            new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
-            today
-          ),
-          api.reports.getTopProducts(today, 10),
-          api.reports.getPaymentBreakdown(today)
+          api.reports.getSummary(range === 'daily' ? today : null, range),
+          api.reports.getSalesChart(startDate, end),
+          api.reports.getTopProducts(range === 'daily' ? today : null, 10, range),
+          api.reports.getPaymentBreakdown(range === 'daily' ? today : null, range)
         ]);
         if (!alive) return;
         setSummary(s.data);
@@ -45,7 +59,7 @@ export default function Dashboard() {
     return () => {
       alive = false;
     };
-  }, [today]);
+  }, [today, range]);
 
   const exportCsv = async () => {
     const start = today;
@@ -69,6 +83,9 @@ export default function Dashboard() {
           Sales Dashboard
         </div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <div style={{ fontWeight: 700 }}>
+            Today: <span className="pink-text">{todayLabel}</span>
+          </div>
           <div style={{ fontWeight: 700 }}>
             Manager: <span className="pink-text">{employee?.full_name || '—'}</span>
           </div>
@@ -100,8 +117,27 @@ export default function Dashboard() {
         <div className="card">Loading reports…</div>
       ) : (
         <div style={{ display: 'grid', gap: 14 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <Button className={range === 'daily' ? 'btn-primary' : 'btn-secondary'} onClick={() => setRange('daily')}>
+              Daily
+            </Button>
+            <Button className={range === 'weekly' ? 'btn-primary' : 'btn-secondary'} onClick={() => setRange('weekly')}>
+              Weekly
+            </Button>
+            <Button className={range === 'monthly' ? 'btn-primary' : 'btn-secondary'} onClick={() => setRange('monthly')}>
+              Monthly
+            </Button>
+          </div>
           <SummaryCards summary={summary} />
-          <SalesChart points={chartPoints} />
+          <div className="card" style={{ padding: 16 }}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Today's Sales Summary</div>
+            <div style={{ opacity: 0.9, lineHeight: 1.6 }}>
+              Today, the store has recorded <strong>{Number(summary?.total_orders || 0)}</strong>{' '}
+              {Number(summary?.total_orders || 0) === 1 ? 'order' : 'orders'} with total sales of{' '}
+              <strong>{formatPHP(summary?.total_sales || 0)}</strong>. The average order value is{' '}
+              <strong>{formatPHP(summary?.avg_order || 0)}</strong>.
+            </div>
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <TopProducts items={topProducts} />
             <PaymentBreakdown breakdown={paymentBreakdown} />

@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from '../common/Button';
 
-export default function InventoryCard({ title, subtitle, progress, badge, onAdjust }) {
+export default function InventoryCard({ title, subtitle, progress, badge, onAdjust, onEdit, onDelete }) {
   return (
     <div
       style={{
@@ -51,6 +51,16 @@ export default function InventoryCard({ title, subtitle, progress, badge, onAdju
         <Button className="btn-secondary" onClick={onAdjust}>
           Adjust Stock
         </Button>
+        {onEdit ? (
+          <Button className="btn-secondary" onClick={onEdit}>
+            Edit
+          </Button>
+        ) : null}
+        {onDelete ? (
+          <Button className="btn-danger" onClick={onDelete}>
+            Delete
+          </Button>
+        ) : null}
       </div>
     </div>
   );

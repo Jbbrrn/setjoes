@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../components/common/Button';
+import Modal from '../components/common/Modal';
+import Input from '../components/common/Input';
 import { useAuth } from '../context/AuthContext';
 import api from '../services/api';
 import InventoryCard from '../components/inventory/InventoryCard';
@@ -19,6 +21,19 @@ export default function Inventory() {
   const [adjustOpen, setAdjustOpen] = useState(false);
   const [adjustItem, setAdjustItem] = useState(null);
   const [adjustKind, setAdjustKind] = useState('ingredient');
+  const [error, setError] = useState('');
+  const [ingredientModalOpen, setIngredientModalOpen] = useState(false);
+  const [editingIngredient, setEditingIngredient] = useState(null);
+  const [ingredientForm, setIngredientForm] = useState({
+    name: '',
+    unit: 'grams',
+    cost_per_unit: '',
+    servings_per_unit: '1',
+    supplier_name: '',
+    reorder_level: '0',
+    quantity: '0',
+    max_capacity: '10000'
+  });
 
   const refresh = async () => {
     setLoading(true);
@@ -57,10 +72,79 @@ export default function Inventory() {
   };
 
   const saveAdjust = async (body) => {
-    await api.inventory.adjustStock(body);
-    setAdjustOpen(false);
-    setAdjustItem(null);
-    await refresh();
+    try {
+      setError('');
+      await api.inventory.adjustStock(body);
+      setAdjustOpen(false);
+      setAdjustItem(null);
+      await refresh();
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to adjust stock');
+    }
+  };
+
+  const openAddIngredient = () => {
+    setEditingIngredient(null);
+    setIngredientForm({
+      name: '',
+      unit: 'grams',
+      cost_per_unit: '',
+      servings_per_unit: '1',
+      supplier_name: '',
+      reorder_level: '0',
+      quantity: '0',
+      max_capacity: '10000'
+    });
+    setIngredientModalOpen(true);
+  };
+
+  const openEditIngredient = (item) => {
+    setEditingIngredient(item);
+    setIngredientForm({
+      name: item.name || '',
+      unit: item.unit || 'grams',
+      cost_per_unit: String(item.cost_per_unit ?? ''),
+      servings_per_unit: String(item.servings_per_unit ?? 1),
+      supplier_name: item.supplier_name || '',
+      reorder_level: String(item.reorder_level ?? 0),
+      quantity: String(item.quantity ?? 0),
+      max_capacity: String(item.max_capacity ?? 10000)
+    });
+    setIngredientModalOpen(true);
+  };
+
+  const saveIngredient = async () => {
+    try {
+      setError('');
+      const payload = {
+        name: ingredientForm.name,
+        unit: ingredientForm.unit,
+        cost_per_unit: Number(ingredientForm.cost_per_unit),
+        servings_per_unit: Number(ingredientForm.servings_per_unit),
+        supplier_name: ingredientForm.supplier_name || null,
+        reorder_level: Number(ingredientForm.reorder_level),
+        quantity: Number(ingredientForm.quantity),
+        max_capacity: Number(ingredientForm.max_capacity)
+      };
+      if (editingIngredient) await api.inventory.updateIngredient(editingIngredient.id, payload);
+      else await api.inventory.createIngredient(payload);
+      setIngredientModalOpen(false);
+      await refresh();
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to save ingredient');
+    }
+  };
+
+  const deleteIngredient = async (item) => {
+    const ok = window.confirm(`Delete ingredient "${item.name}" permanently?`);
+    if (!ok) return;
+    try {
+      setError('');
+      await api.inventory.removeIngredient(item.id);
+      await refresh();
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to delete ingredient');
+    }
   };
 
   return (
@@ -95,6 +179,11 @@ export default function Inventory() {
         <Button className={tab === 'finished' ? 'btn-primary' : 'btn-secondary'} onClick={() => setTab('finished')}>
           Finished Goods
         </Button>
+        {tab === 'ingredients' ? (
+          <Button className="btn-secondary" onClick={openAddIngredient}>
+            + Add Ingredient
+          </Button>
+        ) : null}
         <Button className={lowOnly ? 'btn-primary' : 'btn-secondary'} onClick={() => setLowOnly((v) => !v)}>
           Low Stock Only
         </Button>
@@ -109,6 +198,7 @@ export default function Inventory() {
           Refresh
         </Button>
       </div>
+      {error ? <div className="card error-text" style={{ marginBottom: 12 }}>{error}</div> : null}
 
       {loading ? (
         <div className="card">Loading inventory…</div>
@@ -135,6 +225,8 @@ export default function Inventory() {
                 progress={tab === 'ingredients' ? progress : null}
                 badge={badge}
                 onAdjust={() => openAdjust(it)}
+                onEdit={tab === 'ingredients' ? () => openEditIngredient(it) : null}
+                onDelete={tab === 'ingredients' ? () => deleteIngredient(it) : null}
               />
             );
           })}
@@ -148,6 +240,44 @@ export default function Inventory() {
         onClose={() => setAdjustOpen(false)}
         onSave={saveAdjust}
       />
+
+      <Modal
+        open={ingredientModalOpen}
+        title={editingIngredient ? `Edit Ingredient: ${editingIngredient.name}` : 'Add Ingredient'}
+        onClose={() => setIngredientModalOpen(false)}
+      >
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Ingredient name (example: Kikiam)</div>
+          <Input placeholder="e.g. Kikiam" value={ingredientForm.name} onChange={(e) => setIngredientForm((p) => ({ ...p, name: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Unit of measurement</div>
+          <Input placeholder="e.g. pack, grams, ml, pcs" value={ingredientForm.unit} onChange={(e) => setIngredientForm((p) => ({ ...p, unit: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Cost per unit</div>
+          <Input type="number" placeholder="e.g. 10.50" value={ingredientForm.cost_per_unit} onChange={(e) => setIngredientForm((p) => ({ ...p, cost_per_unit: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Servings per unit (how many pieces one unit makes)</div>
+          <Input type="number" placeholder="e.g. 6 (if 1 pack = 6 buns)" value={ingredientForm.servings_per_unit} onChange={(e) => setIngredientForm((p) => ({ ...p, servings_per_unit: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Supplier name (optional)</div>
+          <Input placeholder="e.g. Local Market Supplier" value={ingredientForm.supplier_name} onChange={(e) => setIngredientForm((p) => ({ ...p, supplier_name: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Reorder level (low stock threshold)</div>
+          <Input type="number" placeholder="e.g. 100" value={ingredientForm.reorder_level} onChange={(e) => setIngredientForm((p) => ({ ...p, reorder_level: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Current quantity</div>
+          <Input type="number" placeholder="e.g. 0" value={ingredientForm.quantity} onChange={(e) => setIngredientForm((p) => ({ ...p, quantity: e.target.value }))} />
+          <div style={{ fontSize: 12, opacity: 0.75 }}>Maximum storage capacity</div>
+          <Input type="number" placeholder="e.g. 10000" value={ingredientForm.max_capacity} onChange={(e) => setIngredientForm((p) => ({ ...p, max_capacity: e.target.value }))} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Button className="btn-secondary" style={{ flex: 1 }} onClick={() => setIngredientModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="btn-primary"
+              style={{ flex: 1 }}
+              onClick={saveIngredient}
+              disabled={!ingredientForm.name.trim() || !ingredientForm.unit.trim()}
+            >
+              Save Ingredient
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

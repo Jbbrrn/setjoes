@@ -14,8 +14,8 @@ export default function ProductCard({ product, onClick }) {
       disabled={isOut}
       onClick={() => onClick(product)}
       style={{
-        width: 160,
-        height: 160,
+        width: '100%',
+        minHeight: 190,
         borderRadius: 12,
         border: '2px solid #FFB6C1',
         background: 'white',
@@ -23,7 +23,10 @@ export default function ProductCard({ product, onClick }) {
         padding: 12,
         textAlign: 'left',
         cursor: isOut ? 'not-allowed' : 'pointer',
-        position: 'relative'
+        position: 'relative',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       {isOut ? (
@@ -47,6 +50,7 @@ export default function ProductCard({ product, onClick }) {
       <div
         style={{
           height: 70,
+          minHeight: 70,
           borderRadius: 10,
           background: '#F8F9FA',
           display: 'flex',
@@ -66,12 +70,24 @@ export default function ProductCard({ product, onClick }) {
         )}
       </div>
 
-      <div style={{ marginTop: 10 }}>
-        <div style={{ fontWeight: 800, fontSize: 16, lineHeight: '20px' }}>{product.name}</div>
+      <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', flex: 1 }}>
+        <div
+          style={{
+            fontWeight: 800,
+            fontSize: 16,
+            lineHeight: '20px',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+            overflow: 'hidden'
+          }}
+        >
+          {product.name}
+        </div>
         <div style={{ fontWeight: 900, marginTop: 6, color: '#FF69B4' }}>
           {formatPHP(product.base_price)}
         </div>
-        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, opacity: 0.9 }}>
+        <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, opacity: 0.9 }}>
           <span style={{ width: 10, height: 10, borderRadius: 99, background: dotColor, display: 'inline-block' }} />
           <span>
             Stock:{' '}

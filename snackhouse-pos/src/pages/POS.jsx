@@ -26,6 +26,7 @@ export default function POS() {
 
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [receipt, setReceipt] = useState(null);
+  const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -34,6 +35,7 @@ export default function POS() {
         setLoading(true);
         const res = await api.products.getAll();
         if (!alive) return;
+        // Backend already returns only active products for POS.
         setProducts(res.data || []);
       } finally {
         if (alive) setLoading(false);
@@ -108,19 +110,24 @@ export default function POS() {
   const remove = (line) => setOrderLines((prev) => prev.filter((l) => l.key !== line.key));
 
   const submitSale = async ({ payment_method, amount_paid }) => {
-    const payload = {
-      items: orderLines.map((l) => ({
-        product_id: l.product_id,
-        variant_id: l.variant_id,
-        quantity: l.quantity
-      })),
-      payment_method,
-      amount_paid
-    };
+    try {
+      setError('');
+      const payload = {
+        items: orderLines.map((l) => ({
+          product_id: l.product_id,
+          variant_id: l.variant_id,
+          quantity: l.quantity
+        })),
+        payment_method,
+        amount_paid
+      };
 
-    const res = await api.orders.create(payload);
-    setReceipt(res.data);
-    setPaymentOpen(false);
+      const res = await api.orders.create(payload);
+      setReceipt(res.data);
+      setPaymentOpen(false);
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to complete sale');
+    }
   };
 
   return (
@@ -152,6 +159,7 @@ export default function POS() {
           </Button>
         </div>
       </div>
+      {error ? <div className="card error-text" style={{ marginBottom: 12 }}>{error}</div> : null}
 
       <div className="pos-layout">
         <div>

@@ -2,6 +2,20 @@ const db = require('../config/database');
 
 const toMoney = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 class BadRequestError extends Error {}
+const PH_TZ = 'Asia/Manila';
+
+const getPhDateParts = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: PH_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return { year, month, day, ymd: `${year}-${month}-${day}` };
+};
 
 const validateOrderPayload = (body) => {
   const items = body && body.items;
@@ -84,15 +98,12 @@ exports.createOrder = async (req, res) => {
     }
 
     // Order number: ORD-YYYYMMDD-### (per day)
-    const [seqRows] = await connection.query(
-      `SELECT COUNT(*) AS cnt FROM orders WHERE DATE(created_at) = CURDATE()`
-    );
+    const phToday = getPhDateParts();
+    const [seqRows] = await connection.query(`SELECT COUNT(*) AS cnt FROM orders WHERE DATE(created_at) = ?`, [
+      phToday.ymd
+    ]);
     const seq = Number(seqRows[0].cnt) + 1;
-    const now = new Date();
-    const y = String(now.getFullYear());
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    const d = String(now.getDate()).padStart(2, '0');
-    const order_number = `ORD-${y}${m}${d}-${String(seq).padStart(3, '0')}`;
+    const order_number = `ORD-${phToday.year}${phToday.month}${phToday.day}-${String(seq).padStart(3, '0')}`;
 
     const [orderResult] = await connection.query(
       `INSERT INTO orders (order_number, employee_id, order_type, subtotal, vat_amount, total_amount, status, completed_at)
@@ -144,13 +155,22 @@ exports.createOrder = async (req, res) => {
            LIMIT 1`,
           [it.product_id, it.variant_id]
         );
-        if (!recipeRows.length) continue; // allow made-to-order without recipe (no deduction)
+        if (!recipeRows.length) {
+          throw new BadRequestError(
+            `Cannot sell ${it.product_name}: made-to-order product has no recipe configured.`
+          );
+        }
 
         const recipe_id = recipeRows[0].id;
         const [recipeItems] = await connection.query(
           'SELECT ingredient_id, quantity FROM recipe_items WHERE recipe_id = ?',
           [recipe_id]
         );
+        if (!recipeItems.length) {
+          throw new BadRequestError(
+            `Cannot sell ${it.product_name}: recipe has no ingredients configured.`
+          );
+        }
 
         for (const ri of recipeItems) {
           const qtyToDeduct = Number(ri.quantity) * it.quantity;

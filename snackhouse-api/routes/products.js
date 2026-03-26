@@ -29,9 +29,28 @@ router.post('/:id/toggle-active', authenticateToken, requireManager, async (req,
   const db = require('../config/database');
   const connection = await db.getConnection();
   try {
-    const [rows] = await connection.query('SELECT is_active FROM products WHERE id = ?', [id]);
+    const [rows] = await connection.query('SELECT is_active, product_type, name FROM products WHERE id = ?', [id]);
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    const next = rows[0].is_active ? 0 : 1;
+    const current = rows[0];
+    const next = current.is_active ? 0 : 1;
+
+    // Made-to-order items can be activated only if they have recipe ingredients.
+    if (next === 1 && current.product_type === 'made-to-order') {
+      const [recipeRows] = await connection.query(
+        `SELECT r.id
+         FROM recipes r
+         JOIN recipe_items ri ON ri.recipe_id = r.id
+         WHERE r.product_id = ?
+         LIMIT 1`,
+        [id]
+      );
+      if (!recipeRows.length) {
+        return res.status(400).json({
+          error: `Cannot activate "${current.name}" yet. Add recipe ingredients first.`
+        });
+      }
+    }
+
     await connection.query('UPDATE products SET is_active = ? WHERE id = ?', [next, id]);
     return res.json({ id, is_active: !!next });
   } catch (e) {

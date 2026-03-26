@@ -24,7 +24,10 @@ export const auth = {
 };
 
 export const products = {
-  getAll: () => api.get('/products'),
+  getAll: (options = {}) =>
+    api.get('/products', {
+      params: options.include_inactive ? { include_inactive: 1 } : undefined
+    }),
   create: (data) => api.post('/products', data),
   update: (id, data) => api.put(`/products/${id}`, data),
   remove: (id) => api.delete(`/products/${id}`),
@@ -42,17 +45,27 @@ export const inventory = {
   getIngredients: () => api.get('/inventory/ingredients'),
   getFinishedGoods: () => api.get('/inventory/finished-goods'),
   getLowStock: () => api.get('/inventory/low-stock'),
-  adjustStock: (data) => api.post('/inventory/adjust', data)
+  adjustStock: (data) => api.post('/inventory/adjust', data),
+  createIngredient: (data) => api.post('/inventory/ingredients', data),
+  updateIngredient: (id, data) => api.put(`/inventory/ingredients/${id}`, data),
+  removeIngredient: (id) => api.delete(`/inventory/ingredients/${id}`)
 };
 
 export const reports = {
-  getSummary: (date) => api.get('/reports/summary', { params: { date } }),
+  getSummary: (date, range) => api.get('/reports/summary', { params: range ? { range } : { date } }),
   getSalesChart: (startDate, endDate) =>
     api.get('/reports/sales-chart', { params: { start_date: startDate, end_date: endDate } }),
-  getTopProducts: (date, limit = 10) => api.get('/reports/top-products', { params: { date, limit } }),
-  getPaymentBreakdown: (date) => api.get('/reports/payment-breakdown', { params: { date } }),
+  getTopProducts: (date, limit = 10, range) =>
+    api.get('/reports/top-products', { params: range ? { range, limit } : { date, limit } }),
+  getPaymentBreakdown: (date, range) =>
+    api.get('/reports/payment-breakdown', { params: range ? { range } : { date } }),
   exportCSV: (startDate, endDate) =>
     api.get('/reports/export-csv', { params: { start_date: startDate, end_date: endDate }, responseType: 'blob' })
+};
+
+export const categories = {
+  list: () => api.get('/categories'),
+  create: (data) => api.post('/categories', data)
 };
 
 export const users = {
@@ -69,7 +82,8 @@ const apiService = {
   orders,
   inventory,
   reports,
-  users
+  users,
+  categories
 };
 
 export default apiService;

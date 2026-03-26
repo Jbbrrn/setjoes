@@ -12,5 +12,10 @@ const pool = mysql.createPool({
   queueLimit: 0
 });
 
+// Force each DB session to Philippine time (UTC+08:00).
+pool.on('connection', (connection) => {
+  connection.query("SET time_zone = '+08:00'");
+});
+
 module.exports = pool;
 

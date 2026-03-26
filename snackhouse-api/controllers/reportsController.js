@@ -1,27 +1,71 @@
 const db = require('../config/database');
+const PH_TZ = 'Asia/Manila';
 
 const parseDate = (s) => {
   if (!s) return null;
-  const d = new Date(s);
+  const value = String(s).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const d = new Date(`${value}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
-  // Return YYYY-MM-DD to keep MySQL date comparisons simple.
-  return d.toISOString().slice(0, 10);
+  return value;
+};
+
+const getPhTodayYmd = () => {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: PH_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const year = parts.find((p) => p.type === 'year')?.value;
+  const month = parts.find((p) => p.type === 'month')?.value;
+  const day = parts.find((p) => p.type === 'day')?.value;
+  return `${year}-${month}-${day}`;
+};
+
+const shiftYmd = (ymd, days) => {
+  const dt = new Date(`${ymd}T00:00:00Z`);
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+};
+
+const parseRange = (req) => {
+  if (req.query.range) {
+    const endDate = getPhTodayYmd();
+    let startDate = endDate;
+    const r = String(req.query.range);
+    if (r === 'weekly') startDate = shiftYmd(endDate, -6);
+    else if (r === 'monthly') startDate = shiftYmd(endDate, -29);
+
+    return {
+      startDate,
+      endDate
+    };
+  }
+  const startDate = parseDate(req.query.start_date);
+  const endDate = parseDate(req.query.end_date);
+  return { startDate, endDate };
 };
 
 exports.getSummary = async (req, res) => {
   const date = parseDate(req.query.date);
-  if (!date) return res.status(400).json({ error: 'Invalid date' });
+  const { startDate, endDate } = parseRange(req);
+  if (!date && !(startDate && endDate)) return res.status(400).json({ error: 'Invalid date or date range' });
 
   const connection = await db.getConnection();
   try {
+    const whereClause = date
+      ? 'DATE(created_at) = ?'
+      : 'created_at >= ? AND created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+    const params = date ? [date] : [startDate, endDate];
     const [rows] = await connection.query(
       `SELECT
          COALESCE(SUM(total_amount), 0) AS total_sales,
          COALESCE(COUNT(*), 0) AS total_orders,
          COALESCE(AVG(total_amount), 0) AS avg_order
        FROM orders
-       WHERE DATE(created_at) = ? AND status = 'completed'`,
-      [date]
+       WHERE ${whereClause} AND status = 'completed'`,
+      params
     );
 
     return res.json(rows[0]);
@@ -63,11 +107,16 @@ exports.getSalesChart = async (req, res) => {
 
 exports.getTopProducts = async (req, res) => {
   const date = parseDate(req.query.date);
+  const { startDate, endDate } = parseRange(req);
   const limit = Number(req.query.limit || 10);
-  if (!date) return res.status(400).json({ error: 'Invalid date' });
+  if (!date && !(startDate && endDate)) return res.status(400).json({ error: 'Invalid date or date range' });
 
   const connection = await db.getConnection();
   try {
+    const whereClause = date
+      ? 'DATE(o.created_at) = ?'
+      : 'o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+    const params = date ? [date, limit] : [startDate, endDate, limit];
     const [rows] = await connection.query(
       `SELECT
          p.name AS product_name,
@@ -76,11 +125,11 @@ exports.getTopProducts = async (req, res) => {
        FROM orders o
        JOIN order_items oi ON oi.order_id = o.id
        JOIN products p ON p.id = oi.product_id
-       WHERE DATE(o.created_at) = ? AND o.status = 'completed'
+       WHERE ${whereClause} AND o.status = 'completed'
        GROUP BY p.id, p.name
        ORDER BY revenue DESC
        LIMIT ?`,
-      [date, limit]
+      params
     );
     return res.json({ items: rows });
   } catch (err) {
@@ -94,17 +143,22 @@ exports.getTopProducts = async (req, res) => {
 
 exports.getPaymentBreakdown = async (req, res) => {
   const date = parseDate(req.query.date);
-  if (!date) return res.status(400).json({ error: 'Invalid date' });
+  const { startDate, endDate } = parseRange(req);
+  if (!date && !(startDate && endDate)) return res.status(400).json({ error: 'Invalid date or date range' });
 
   const connection = await db.getConnection();
   try {
+    const whereClause = date
+      ? 'DATE(o.created_at) = ?'
+      : 'o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)';
+    const params = date ? [date] : [startDate, endDate];
     const [rows] = await connection.query(
       `SELECT payment_method, SUM(amount_paid) AS total_amount
        FROM payments p
        JOIN orders o ON o.id = p.order_id
-       WHERE DATE(o.created_at) = ? AND o.status = 'completed'
+       WHERE ${whereClause} AND o.status = 'completed'
        GROUP BY payment_method`,
-      [date]
+      params
     );
 
     // Return Cash + GCash normalized keys for UI.

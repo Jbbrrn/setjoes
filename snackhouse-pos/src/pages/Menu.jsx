@@ -28,11 +28,20 @@ export default function Menu() {
   const [recipeProduct, setRecipeProduct] = useState(null);
   const [ingredients, setIngredients] = useState([]);
   const [recipeItems, setRecipeItems] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+
+  const toIsActive = (value) => {
+    if (value === true || value === 1 || value === '1' || value === 'true') return true;
+    if (value === false || value === 0 || value === '0' || value === 'false' || value === null) return false;
+    return true;
+  };
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const res = await api.products.getAll();
+      const res = await api.products.getAll({ include_inactive: true });
       setProducts(res.data || []);
     } finally {
       setLoading(false);
@@ -43,8 +52,9 @@ export default function Menu() {
     refresh();
     (async () => {
       try {
-        const res = await api.inventory.getIngredients();
-        setIngredients(res.data || []);
+        const [ingRes, catRes] = await Promise.all([api.inventory.getIngredients(), api.categories.list()]);
+        setIngredients(ingRes.data || []);
+        setCategories(catRes.data || []);
       } catch (e) {
         // ignore and show empty recipe options
       }
@@ -60,17 +70,18 @@ export default function Menu() {
   }, [products, query]);
 
   const toggleActive = async (p) => {
-    await api.products.toggleActive(p.id);
-    await refresh();
-  };
-
-  const categories = useMemo(() => {
-    const map = new Map();
-    for (const p of products) {
-      if (!map.has(p.category_id)) map.set(p.category_id, p.category_name || `Category ${p.category_id}`);
+    try {
+      setError('');
+      await api.products.toggleActive(p.id);
+      // Immediate UI update so badge/button reflect change even before refresh.
+      setProducts((prev) =>
+        prev.map((x) => (x.id === p.id ? { ...x, is_active: toIsActive(x.is_active) ? 0 : 1 } : x))
+      );
+      await refresh();
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to change product status');
     }
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [products]);
+  };
 
   const openCreate = () => {
     setEditing(null);
@@ -127,6 +138,19 @@ export default function Menu() {
     }
   };
 
+  const saveCategory = async () => {
+    try {
+      setError('');
+      await api.categories.create({ name: newCategoryName.trim() });
+      const res = await api.categories.list();
+      setCategories(res.data || []);
+      setCategoryOpen(false);
+      setNewCategoryName('');
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to create category');
+    }
+  };
+
   const removeProduct = async (p) => {
     const ok = window.confirm(`Delete product "${p.name}" permanently?`);
     if (!ok) return;
@@ -177,6 +201,9 @@ export default function Menu() {
         <div style={{ display: 'flex', gap: 12 }}>
           <Button className="btn-secondary" onClick={openCreate}>
             + Add Product
+          </Button>
+          <Button className="btn-secondary" onClick={() => setCategoryOpen(true)}>
+            + Add Category
           </Button>
           <Button className="btn-secondary" onClick={() => navigate('/dashboard')}>
             Dashboard
@@ -313,6 +340,20 @@ export default function Menu() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal open={categoryOpen} title="Add Category" onClose={() => setCategoryOpen(false)}>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <Input placeholder="Category name" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} />
+          <div style={{ display: 'flex', gap: 10 }}>
+            <Button className="btn-secondary" style={{ flex: 1 }} onClick={() => setCategoryOpen(false)}>
+              Cancel
+            </Button>
+            <Button className="btn-primary" style={{ flex: 1 }} onClick={saveCategory} disabled={!newCategoryName.trim()}>
+              Save Category
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );

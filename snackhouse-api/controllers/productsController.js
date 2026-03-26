@@ -13,7 +13,9 @@ const ensureFinishedGoodsInventory = async (connection, productId) => {
 exports.getProducts = async (req, res) => {
   const connection = await db.getConnection();
   try {
-    const activeFilter = req.employee && req.employee.role === 'manager' ? '' : 'WHERE p.is_active = 1';
+    const includeInactive = String(req.query.include_inactive || '') === '1';
+    const canSeeInactive = req.employee && req.employee.role === 'manager' && includeInactive;
+    const activeFilter = canSeeInactive ? '' : 'WHERE p.is_active = 1';
     const [rows] = await connection.query(
       `SELECT p.id, p.name, p.category_id, p.base_price, p.product_type, p.has_variants, p.is_active, p.image_url,
               c.name AS category_name, c.display_order
@@ -75,24 +77,28 @@ exports.getProducts = async (req, res) => {
           [r.id]
         );
         if (!recipeRows.length) {
-          current_stock = null;
+          current_stock = 0;
         } else {
           const recipeId = recipeRows[0].id;
           const [riRows] = await connection.query(
             `SELECT ri.quantity AS per_serving, inv.quantity AS on_hand
              FROM recipe_items ri
-             JOIN ingredient_inventory inv ON inv.ingredient_id = ri.ingredient_id
+             LEFT JOIN ingredient_inventory inv ON inv.ingredient_id = ri.ingredient_id
              WHERE ri.recipe_id = ?`,
             [recipeId]
           );
+          if (!riRows.length) {
+            current_stock = 0;
+          } else {
           let possible = Infinity;
           for (const ri of riRows) {
             const per = Number(ri.per_serving);
-            const onHand = Number(ri.on_hand);
+            const onHand = Number(ri.on_hand || 0);
             if (per <= 0) continue;
             possible = Math.min(possible, Math.floor(onHand / per));
           }
-          current_stock = possible === Infinity ? null : possible;
+          current_stock = possible === Infinity ? 0 : possible;
+          }
         }
       }
 
@@ -104,6 +110,7 @@ exports.getProducts = async (req, res) => {
       base_price: r.base_price,
       product_type: r.product_type,
       has_variants: !!r.has_variants,
+      is_active: !!r.is_active,
       image_url: r.image_url,
       current_stock,
       reorder_level,
@@ -132,10 +139,19 @@ exports.createProduct = async (req, res) => {
 
   const connection = await db.getConnection();
   try {
+    const normalizedName = name.trim();
+    const [dupRows] = await connection.query(
+      'SELECT id FROM products WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      [normalizedName]
+    );
+    if (dupRows.length) {
+      return res.status(409).json({ error: 'A product with that name already exists.' });
+    }
+
     const [result] = await connection.query(
       `INSERT INTO products (name, category_id, base_price, product_type, has_variants, is_active, image_url)
-       VALUES (?, ?, ?, ?, 0, 1, ?)`,
-      [name.trim(), Number(category_id), Number(base_price), product_type, image_url || null]
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
+      [normalizedName, Number(category_id), Number(base_price), product_type, product_type === 'made-to-order' ? 0 : 1, image_url || null]
     );
     if (product_type === 'finished-goods') {
       await ensureFinishedGoodsInventory(connection, result.insertId);
@@ -187,6 +203,17 @@ exports.updateProduct = async (req, res) => {
 
   const connection = await db.getConnection();
   try {
+    if (name !== undefined) {
+      const normalizedName = String(name).trim();
+      const [dupRows] = await connection.query(
+        'SELECT id FROM products WHERE LOWER(name) = LOWER(?) AND id <> ? LIMIT 1',
+        [normalizedName, id]
+      );
+      if (dupRows.length) {
+        return res.status(409).json({ error: 'A product with that name already exists.' });
+      }
+    }
+
     values.push(id);
     const [result] = await connection.query(
       `UPDATE products SET ${fields.join(', ')} WHERE id = ?`,
@@ -212,13 +239,44 @@ exports.deleteProduct = async (req, res) => {
 
   const connection = await db.getConnection();
   try {
+    await connection.beginTransaction();
+
+    const [rows] = await connection.query('SELECT id, is_active FROM products WHERE id = ? LIMIT 1', [id]);
+    if (!rows.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Not found' });
+    }
+    if (rows[0].is_active) {
+      await connection.rollback();
+      return res.status(400).json({ error: 'Deactivate the product first before permanent delete.' });
+    }
+
+    const [orderRefs] = await connection.query('SELECT COUNT(*) AS cnt FROM order_items WHERE product_id = ?', [id]);
+    if (Number(orderRefs[0].cnt) > 0) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'Cannot permanently delete this product because it has existing sales history.'
+      });
+    }
+
+    await connection.query('DELETE FROM inventory_transactions WHERE product_id = ?', [id]);
+    await connection.query('DELETE FROM inventory WHERE product_id = ?', [id]);
+    await connection.query('DELETE FROM recipe_items WHERE recipe_id IN (SELECT id FROM recipes WHERE product_id = ?)', [id]);
+    await connection.query('DELETE FROM recipes WHERE product_id = ?', [id]);
+    await connection.query('DELETE FROM product_variants WHERE product_id = ?', [id]);
+
     const [result] = await connection.query('DELETE FROM products WHERE id = ?', [id]);
-    if (!result.affectedRows) return res.status(404).json({ error: 'Not found' });
+    if (!result.affectedRows) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Not found' });
+    }
+    await connection.commit();
     return res.json({ ok: true });
   } catch (err) {
+    await connection.rollback();
     if (err && (err.code === 'ER_ROW_IS_REFERENCED_2' || err.code === 'ER_ROW_IS_REFERENCED')) {
       return res.status(409).json({
-        error: 'Cannot delete this product because it is referenced by inventory/orders. Deactivate it instead.'
+        error: 'Cannot permanently delete this product because it is referenced by existing records.'
       });
     }
     // eslint-disable-next-line no-console
