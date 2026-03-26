@@ -23,7 +23,7 @@ async function main() {
   }
 
   // Build the React app.
-  await run('npm', ['ci'], posDir);
+  await run('npm', ['install'], posDir);
   await run('npm', ['run', 'build'], posDir);
 
   // Copy build output into the API, so the web service can serve it.
