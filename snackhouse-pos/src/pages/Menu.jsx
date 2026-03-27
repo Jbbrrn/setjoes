@@ -170,7 +170,9 @@ export default function Menu() {
   };
 
   const removeProduct = async (p) => {
-    const ok = window.confirm(`Delete product "${p.name}" permanently?`);
+    const ok = window.confirm(
+      `Are you sure you want to delete "${p.name}"?\n\nThis will permanently delete the product if allowed.`
+    );
     if (!ok) return;
     try {
       await api.products.remove(p.id);
