@@ -1,7 +1,7 @@
 import React from 'react';
 import Button from '../common/Button';
 
-export default function ProductList({ products, onEdit, onDeactivate, onDelete, onRecipe }) {
+export default function ProductList({ products, onEdit, onDeactivate, onDelete, onRecipe, onVariants }) {
   const toIsActive = (value) => {
     if (value === true || value === 1 || value === '1' || value === 'true') return true;
     if (value === false || value === 0 || value === '0' || value === 'false' || value === null) return false;
@@ -46,9 +46,12 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
                 Variants: {p.has_variants ? (p.variants || []).map((v) => `${v.variant_name} (₱${Number(v.price).toFixed(2)})`).join(', ') || '—' : 'None'}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'start' }}>
+            <div className="actions-row">
               <Button className="btn-secondary" onClick={() => onRecipe(p)}>
                 Recipe
+              </Button>
+              <Button className="btn-secondary" onClick={() => onVariants(p)}>
+                Variants
               </Button>
               <Button className="btn-secondary" onClick={() => onEdit(p)}>
                 Edit

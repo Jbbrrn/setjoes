@@ -290,16 +290,34 @@ exports.deleteProduct = async (req, res) => {
 exports.getRecipe = async (req, res) => {
   const productId = Number(req.params.id);
   if (!Number.isFinite(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product id' });
+  const variantIdRaw = req.query.variant_id;
+  const hasVariantFilter = variantIdRaw !== undefined && variantIdRaw !== null && String(variantIdRaw) !== '';
+  const variantId = hasVariantFilter ? Number(variantIdRaw) : null;
+  if (hasVariantFilter && (!Number.isFinite(variantId) || variantId <= 0)) {
+    return res.status(400).json({ error: 'Invalid variant_id' });
+  }
 
   const connection = await db.getConnection();
   try {
+    if (hasVariantFilter) {
+      const [variantRows] = await connection.query(
+        'SELECT id FROM product_variants WHERE id = ? AND product_id = ? LIMIT 1',
+        [variantId, productId]
+      );
+      if (!variantRows.length) return res.status(404).json({ error: 'Variant not found for this product' });
+    }
+
     const [recipeRows] = await connection.query(
       `SELECT id, name, instructions, prep_time_minutes
        FROM recipes
-       WHERE product_id = ? AND variant_id IS NULL
+       WHERE product_id = ?
+         AND (
+           (? = 1 AND variant_id = ?)
+           OR (? = 0 AND variant_id IS NULL)
+         )
        ORDER BY id ASC
        LIMIT 1`,
-      [productId]
+      [productId, hasVariantFilter ? 1 : 0, variantId, hasVariantFilter ? 1 : 0]
     );
     if (!recipeRows.length) return res.json({ recipe: null, items: [] });
 
@@ -325,6 +343,12 @@ exports.getRecipe = async (req, res) => {
 exports.saveRecipe = async (req, res) => {
   const productId = Number(req.params.id);
   if (!Number.isFinite(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product id' });
+  const variantIdRaw = req.query.variant_id;
+  const hasVariantFilter = variantIdRaw !== undefined && variantIdRaw !== null && String(variantIdRaw) !== '';
+  const variantId = hasVariantFilter ? Number(variantIdRaw) : null;
+  if (hasVariantFilter && (!Number.isFinite(variantId) || variantId <= 0)) {
+    return res.status(400).json({ error: 'Invalid variant_id' });
+  }
   const { items, name } = req.body || {};
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'Recipe items are required' });
@@ -354,13 +378,27 @@ exports.saveRecipe = async (req, res) => {
       await connection.rollback();
       return res.status(400).json({ error: 'Only made-to-order products can have recipes' });
     }
+    if (hasVariantFilter) {
+      const [variantRows] = await connection.query(
+        'SELECT id FROM product_variants WHERE id = ? AND product_id = ? LIMIT 1',
+        [variantId, productId]
+      );
+      if (!variantRows.length) {
+        await connection.rollback();
+        return res.status(404).json({ error: 'Variant not found for this product' });
+      }
+    }
 
     const [recipeRows] = await connection.query(
       `SELECT id FROM recipes
-       WHERE product_id = ? AND variant_id IS NULL
+       WHERE product_id = ?
+         AND (
+           (? = 1 AND variant_id = ?)
+           OR (? = 0 AND variant_id IS NULL)
+         )
        ORDER BY id ASC
        LIMIT 1`,
-      [productId]
+      [productId, hasVariantFilter ? 1 : 0, variantId, hasVariantFilter ? 1 : 0]
     );
 
     let recipeId;
@@ -372,8 +410,8 @@ exports.saveRecipe = async (req, res) => {
       );
     } else {
       const [insert] = await connection.query(
-        'INSERT INTO recipes (product_id, variant_id, name) VALUES (?, NULL, ?)',
-        [productId, name || `${productRows[0].name} Recipe`]
+        'INSERT INTO recipes (product_id, variant_id, name) VALUES (?, ?, ?)',
+        [productId, hasVariantFilter ? variantId : null, name || `${productRows[0].name} Recipe`]
       );
       recipeId = insert.insertId;
     }
@@ -394,6 +432,177 @@ exports.saveRecipe = async (req, res) => {
     // eslint-disable-next-line no-console
     console.error('saveRecipe error:', err);
     return res.status(500).json({ error: 'Failed to save recipe.' });
+  } finally {
+    connection.release();
+  }
+};
+
+exports.listVariants = async (req, res) => {
+  const productId = Number(req.params.id);
+  if (!Number.isFinite(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product id' });
+  const connection = await db.getConnection();
+  try {
+    const [rows] = await connection.query(
+      `SELECT id, product_id, variant_name, price, is_active
+       FROM product_variants
+       WHERE product_id = ?
+       ORDER BY id ASC`,
+      [productId]
+    );
+    return res.json(rows.map((r) => ({ ...r, price: Number(r.price), is_active: !!r.is_active })));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('listVariants error:', err);
+    return res.status(500).json({ error: 'Failed to load variants.' });
+  } finally {
+    connection.release();
+  }
+};
+
+exports.createVariant = async (req, res) => {
+  const productId = Number(req.params.id);
+  if (!Number.isFinite(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product id' });
+  const { variant_name, price } = req.body || {};
+  if (!variant_name || typeof variant_name !== 'string') return res.status(400).json({ error: 'Invalid variant_name' });
+  if (!Number.isFinite(Number(price))) return res.status(400).json({ error: 'Invalid price' });
+
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [productRows] = await connection.query('SELECT id FROM products WHERE id = ? LIMIT 1', [productId]);
+    if (!productRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Product not found' });
+    }
+
+    const name = variant_name.trim();
+    const [dupRows] = await connection.query(
+      `SELECT id FROM product_variants
+       WHERE product_id = ? AND LOWER(variant_name) = LOWER(?)
+       LIMIT 1`,
+      [productId, name]
+    );
+    if (dupRows.length) {
+      await connection.rollback();
+      return res.status(409).json({ error: 'A variant with that name already exists for this product.' });
+    }
+
+    const [insert] = await connection.query(
+      `INSERT INTO product_variants (product_id, variant_name, price, is_active)
+       VALUES (?, ?, ?, 1)`,
+      [productId, name, Number(price)]
+    );
+    await connection.query('UPDATE products SET has_variants = 1 WHERE id = ?', [productId]);
+    await connection.commit();
+    return res.status(201).json({ id: insert.insertId });
+  } catch (err) {
+    await connection.rollback();
+    // eslint-disable-next-line no-console
+    console.error('createVariant error:', err);
+    return res.status(500).json({ error: 'Failed to create variant.' });
+  } finally {
+    connection.release();
+  }
+};
+
+exports.updateVariant = async (req, res) => {
+  const productId = Number(req.params.id);
+  const variantId = Number(req.params.variantId);
+  if (!Number.isFinite(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product id' });
+  if (!Number.isFinite(variantId) || variantId <= 0) return res.status(400).json({ error: 'Invalid variant id' });
+  const { variant_name, price, is_active } = req.body || {};
+
+  const fields = [];
+  const values = [];
+  if (variant_name !== undefined) {
+    if (!variant_name || typeof variant_name !== 'string') return res.status(400).json({ error: 'Invalid variant_name' });
+    fields.push('variant_name = ?');
+    values.push(String(variant_name).trim());
+  }
+  if (price !== undefined) {
+    if (!Number.isFinite(Number(price))) return res.status(400).json({ error: 'Invalid price' });
+    fields.push('price = ?');
+    values.push(Number(price));
+  }
+  if (is_active !== undefined) {
+    fields.push('is_active = ?');
+    values.push(is_active ? 1 : 0);
+  }
+  if (!fields.length) return res.status(400).json({ error: 'No updates provided' });
+
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    if (variant_name !== undefined) {
+      const name = String(variant_name).trim();
+      const [dupRows] = await connection.query(
+        `SELECT id FROM product_variants
+         WHERE product_id = ? AND LOWER(variant_name) = LOWER(?) AND id <> ?
+         LIMIT 1`,
+        [productId, name, variantId]
+      );
+      if (dupRows.length) {
+        await connection.rollback();
+        return res.status(409).json({ error: 'A variant with that name already exists for this product.' });
+      }
+    }
+
+    values.push(productId, variantId);
+    const [result] = await connection.query(
+      `UPDATE product_variants SET ${fields.join(', ')} WHERE product_id = ? AND id = ?`,
+      values
+    );
+    if (!result.affectedRows) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Variant not found' });
+    }
+
+    const [activeRows] = await connection.query(
+      'SELECT COUNT(*) AS cnt FROM product_variants WHERE product_id = ? AND is_active = 1',
+      [productId]
+    );
+    await connection.query('UPDATE products SET has_variants = ? WHERE id = ?', [Number(activeRows[0].cnt) > 0 ? 1 : 0, productId]);
+
+    await connection.commit();
+    return res.json({ ok: true });
+  } catch (err) {
+    await connection.rollback();
+    // eslint-disable-next-line no-console
+    console.error('updateVariant error:', err);
+    return res.status(500).json({ error: 'Failed to update variant.' });
+  } finally {
+    connection.release();
+  }
+};
+
+exports.deleteVariant = async (req, res) => {
+  const productId = Number(req.params.id);
+  const variantId = Number(req.params.variantId);
+  if (!Number.isFinite(productId) || productId <= 0) return res.status(400).json({ error: 'Invalid product id' });
+  if (!Number.isFinite(variantId) || variantId <= 0) return res.status(400).json({ error: 'Invalid variant id' });
+
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const [result] = await connection.query('DELETE FROM product_variants WHERE product_id = ? AND id = ?', [productId, variantId]);
+    if (!result.affectedRows) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Variant not found' });
+    }
+
+    const [activeRows] = await connection.query(
+      'SELECT COUNT(*) AS cnt FROM product_variants WHERE product_id = ? AND is_active = 1',
+      [productId]
+    );
+    await connection.query('UPDATE products SET has_variants = ? WHERE id = ?', [Number(activeRows[0].cnt) > 0 ? 1 : 0, productId]);
+
+    await connection.commit();
+    return res.json({ ok: true });
+  } catch (err) {
+    await connection.rollback();
+    // eslint-disable-next-line no-console
+    console.error('deleteVariant error:', err);
+    return res.status(500).json({ error: 'Failed to delete variant.' });
   } finally {
     connection.release();
   }

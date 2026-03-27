@@ -28,9 +28,15 @@ export default function Menu() {
   const [recipeProduct, setRecipeProduct] = useState(null);
   const [ingredients, setIngredients] = useState([]);
   const [recipeItems, setRecipeItems] = useState([]);
+  const [recipeVariantId, setRecipeVariantId] = useState('');
   const [categories, setCategories] = useState([]);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [variantsOpen, setVariantsOpen] = useState(false);
+  const [variantsProduct, setVariantsProduct] = useState(null);
+  const [variants, setVariants] = useState([]);
+  const [newVariant, setNewVariant] = useState({ variant_name: '', price: '' });
+  const [variantError, setVariantError] = useState('');
 
   const toIsActive = (value) => {
     if (value === true || value === 1 || value === '1' || value === 'true') return true;
@@ -93,10 +99,13 @@ export default function Menu() {
       image_url: ''
     });
     setError('');
+    setVariantsProduct(null);
+    setVariants([]);
+    setNewVariant({ variant_name: '', price: '' });
     setOpen(true);
   };
 
-  const openEdit = (p) => {
+  const openEdit = async (p) => {
     setEditing(p);
     setForm({
       name: p.name || '',
@@ -106,6 +115,15 @@ export default function Menu() {
       image_url: p.image_url || ''
     });
     setError('');
+    setVariantsProduct(p);
+    try {
+      const res = await api.products.listVariants(p.id);
+      setVariants(res.data || []);
+    } catch (e) {
+      setVariants([]);
+      setError(e?.response?.data?.error || 'Failed to load variants');
+    }
+    setNewVariant({ variant_name: '', price: '' });
     setOpen(true);
   };
 
@@ -164,8 +182,10 @@ export default function Menu() {
 
   const openRecipe = async (p) => {
     setRecipeProduct(p);
+    const firstVariantId = p.has_variants && (p.variants || []).length > 0 ? String(p.variants[0].id) : '';
+    setRecipeVariantId(firstVariantId);
     try {
-      const res = await api.products.getRecipe(p.id);
+      const res = await api.products.getRecipe(p.id, { variant_id: firstVariantId || undefined });
       const items = (res.data?.items || []).map((it) => ({
         ingredient_id: Number(it.ingredient_id),
         quantity: String(it.quantity)
@@ -181,14 +201,107 @@ export default function Menu() {
     if (!recipeProduct) return;
     try {
       setError('');
-      await api.products.saveRecipe(recipeProduct.id, {
-        items: recipeItems
-          .filter((it) => Number(it.ingredient_id) && Number(it.quantity) > 0)
-          .map((it) => ({ ingredient_id: Number(it.ingredient_id), quantity: Number(it.quantity) }))
-      });
+      await api.products.saveRecipe(
+        recipeProduct.id,
+        {
+          items: recipeItems
+            .filter((it) => Number(it.ingredient_id) && Number(it.quantity) > 0)
+            .map((it) => ({ ingredient_id: Number(it.ingredient_id), quantity: Number(it.quantity) }))
+        },
+        { variant_id: recipeVariantId || undefined }
+      );
       setRecipeOpen(false);
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to save recipe');
+    }
+  };
+
+  const onRecipeVariantChange = async (value) => {
+    if (!recipeProduct) return;
+    setRecipeVariantId(value);
+    try {
+      const res = await api.products.getRecipe(recipeProduct.id, { variant_id: value || undefined });
+      const items = (res.data?.items || []).map((it) => ({
+        ingredient_id: Number(it.ingredient_id),
+        quantity: String(it.quantity)
+      }));
+      setRecipeItems(items.length ? items : [{ ingredient_id: ingredients[0]?.id || '', quantity: '' }]);
+    } catch (e) {
+      setRecipeItems([{ ingredient_id: ingredients[0]?.id || '', quantity: '' }]);
+    }
+  };
+
+  const openVariants = async (p) => {
+    try {
+      setError('');
+      setVariantError('');
+      setVariantsProduct(p);
+      const res = await api.products.listVariants(p.id);
+      setVariants(res.data || []);
+      setNewVariant({ variant_name: '', price: '' });
+      setVariantsOpen(true);
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error || e?.message || 'Failed to load variants';
+      setVariantError(status ? `(${status}) ${msg}` : msg);
+      setError(status ? `(${status}) ${msg}` : msg);
+    }
+  };
+
+  const addVariant = async () => {
+    if (!variantsProduct) return;
+    try {
+      setError('');
+      setVariantError('');
+      await api.products.createVariant(variantsProduct.id, {
+        variant_name: newVariant.variant_name.trim(),
+        price: Number(newVariant.price)
+      });
+      const res = await api.products.listVariants(variantsProduct.id);
+      setVariants(res.data || []);
+      setNewVariant({ variant_name: '', price: '' });
+      await refresh();
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error || e?.message || 'Failed to add variant';
+      setVariantError(status ? `(${status}) ${msg}` : msg);
+      setError(status ? `(${status}) ${msg}` : msg);
+    }
+  };
+
+  const updateVariant = async (variantId, patch) => {
+    if (!variantsProduct) return;
+    try {
+      setError('');
+      setVariantError('');
+      await api.products.updateVariant(variantsProduct.id, variantId, patch);
+      const res = await api.products.listVariants(variantsProduct.id);
+      setVariants(res.data || []);
+      await refresh();
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error || e?.message || 'Failed to update variant';
+      setVariantError(status ? `(${status}) ${msg}` : msg);
+      setError(status ? `(${status}) ${msg}` : msg);
+    }
+  };
+
+  const deleteVariant = async (variantId) => {
+    if (!variantsProduct) return;
+    const ok = window.confirm('Delete this variant permanently?');
+    if (!ok) return;
+    try {
+      setError('');
+      setVariantError('');
+      await api.products.removeVariant(variantsProduct.id, variantId);
+      const res = await api.products.listVariants(variantsProduct.id);
+      setVariants(res.data || []);
+      await refresh();
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error || e?.message || 'Failed to delete variant';
+      setVariantError(status ? `(${status}) ${msg}` : msg);
+      setError(status ? `(${status}) ${msg}` : msg);
     }
   };
 
@@ -240,6 +353,7 @@ export default function Menu() {
           onDeactivate={toggleActive}
           onDelete={removeProduct}
           onRecipe={openRecipe}
+          onVariants={openVariants}
         />
       )}
 
@@ -275,6 +389,82 @@ export default function Menu() {
               Save Product
             </Button>
           </div>
+
+          {editing ? (
+            <div className="card" style={{ padding: 12 }}>
+              <div style={{ fontWeight: 800, marginBottom: 8 }}>Product Variants</div>
+              {(variants || []).length === 0 ? (
+                <div style={{ opacity: 0.8, marginBottom: 8 }}>No variants yet. Add one below.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {variants.map((v) => (
+                    <div
+                      key={v.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.3fr 1fr auto auto',
+                        gap: 8,
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Input
+                        value={v.variant_name || ''}
+                        onChange={(e) =>
+                          setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, variant_name: e.target.value } : x)))
+                        }
+                      />
+                      <Input
+                        type="number"
+                        value={String(v.price ?? '')}
+                        onChange={(e) =>
+                          setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, price: e.target.value } : x)))
+                        }
+                      />
+                      <Button
+                        className="btn-secondary"
+                        onClick={() =>
+                          updateVariant(v.id, {
+                            variant_name: v.variant_name,
+                            price: Number(v.price)
+                          })
+                        }
+                      >
+                        Save
+                      </Button>
+                      <Button className="btn-danger" onClick={() => deleteVariant(v.id)}>
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: '1.3fr 1fr auto', gap: 8 }}>
+                <Input
+                  placeholder="Variant name (e.g. B1T1 + Cheese)"
+                  value={newVariant.variant_name}
+                  onChange={(e) => setNewVariant((p) => ({ ...p, variant_name: e.target.value }))}
+                />
+                <Input
+                  type="number"
+                  placeholder="Price"
+                  value={newVariant.price}
+                  onChange={(e) => setNewVariant((p) => ({ ...p, price: e.target.value }))}
+                />
+                <Button
+                  className="btn-primary"
+                  onClick={addVariant}
+                  disabled={!newVariant.variant_name.trim() || !Number.isFinite(Number(newVariant.price))}
+                >
+                  Add
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 12, opacity: 0.9 }}>
+              Save the product first, then edit it to add variants (example: B1T1 + Cheese).
+            </div>
+          )}
         </div>
       </Modal>
 
@@ -287,6 +477,19 @@ export default function Menu() {
           <div className="error-text">Only made-to-order products use ingredient recipes.</div>
         ) : (
           <div style={{ display: 'grid', gap: 10 }}>
+            {recipeProduct?.has_variants ? (
+              <select
+                className="input"
+                value={recipeVariantId}
+                onChange={(e) => onRecipeVariantChange(e.target.value)}
+              >
+                {(recipeProduct.variants || []).map((v) => (
+                  <option key={v.id} value={String(v.id)}>
+                    {v.variant_name} (₱{Number(v.price).toFixed(2)})
+                  </option>
+                ))}
+              </select>
+            ) : null}
             {recipeItems.map((it, idx) => (
               <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr auto', gap: 8 }}>
                 <select
@@ -340,6 +543,103 @@ export default function Menu() {
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={variantsOpen}
+        title={variantsProduct ? `Variants: ${variantsProduct.name}` : 'Variants'}
+        onClose={() => setVariantsOpen(false)}
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          {variantError ? <div className="card error-text">{variantError}</div> : null}
+          <div style={{ fontSize: 13, opacity: 0.85 }}>
+            Add pricing variants like “B1T1 + Cheese” so POS can prompt for a selection.
+          </div>
+
+          {(variants || []).length === 0 ? (
+            <div style={{ opacity: 0.8 }}>No variants yet.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {variants.map((v) => (
+                <div
+                  key={v.id}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1.5fr 1fr auto auto',
+                    gap: 8,
+                    alignItems: 'center'
+                  }}
+                >
+                  <Input
+                    value={v.variant_name || ''}
+                    onChange={(e) =>
+                      setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, variant_name: e.target.value } : x)))
+                    }
+                  />
+                  <Input
+                    type="number"
+                    value={String(v.price ?? '')}
+                    onChange={(e) =>
+                      setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, price: e.target.value } : x)))
+                    }
+                  />
+                  <Button
+                    className={v.is_active ? 'btn-secondary' : 'btn-primary'}
+                    onClick={() => updateVariant(v.id, { is_active: !v.is_active })}
+                  >
+                    {v.is_active ? 'Active' : 'Inactive'}
+                  </Button>
+                  <Button className="btn-danger" onClick={() => deleteVariant(v.id)}>
+                    Delete
+                  </Button>
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button
+                      className="btn-secondary"
+                      onClick={() =>
+                        updateVariant(v.id, {
+                          variant_name: v.variant_name,
+                          price: Number(v.price)
+                        })
+                      }
+                    >
+                      Save Changes
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="card" style={{ padding: 12 }}>
+            <div style={{ fontWeight: 800, marginBottom: 8 }}>Add new variant</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 8 }}>
+              <Input
+                placeholder="Variant name (e.g. B1T1 + Cheese)"
+                value={newVariant.variant_name}
+                onChange={(e) => setNewVariant((p) => ({ ...p, variant_name: e.target.value }))}
+              />
+              <Input
+                type="number"
+                placeholder="Price (e.g. 120)"
+                value={newVariant.price}
+                onChange={(e) => setNewVariant((p) => ({ ...p, price: e.target.value }))}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+              <Button className="btn-secondary" style={{ flex: 1 }} onClick={() => setVariantsOpen(false)}>
+                Close
+              </Button>
+              <Button
+                className="btn-primary"
+                style={{ flex: 1 }}
+                onClick={addVariant}
+                disabled={!newVariant.variant_name.trim() || !Number.isFinite(Number(newVariant.price))}
+              >
+                Add Variant
+              </Button>
+            </div>
+          </div>
+        </div>
       </Modal>
 
       <Modal open={categoryOpen} title="Add Category" onClose={() => setCategoryOpen(false)}>

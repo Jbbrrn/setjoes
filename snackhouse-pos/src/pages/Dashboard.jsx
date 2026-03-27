@@ -78,11 +78,11 @@ export default function Dashboard() {
 
   return (
     <div style={{ padding: 20 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+      <div className="header-row" style={{ marginBottom: 18 }}>
         <div style={{ fontSize: 26, fontWeight: 800 }} className="pink-text">
           Sales Dashboard
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+        <div className="actions-row" style={{ alignItems: 'center' }}>
           <div style={{ fontWeight: 700 }}>
             Today: <span className="pink-text">{todayLabel}</span>
           </div>
@@ -138,7 +138,7 @@ export default function Dashboard() {
               <strong>{formatPHP(summary?.avg_order || 0)}</strong>.
             </div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+          <div className="two-col-grid">
             <TopProducts items={topProducts} />
             <PaymentBreakdown breakdown={paymentBreakdown} />
           </div>

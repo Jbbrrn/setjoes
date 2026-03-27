@@ -216,7 +216,7 @@ export default function Inventory() {
             const subtitle =
               tab === 'ingredients'
                 ? `Stock: ${qty}${it.unit || ''} / ${cap || '—'}${it.unit || ''}  •  Cost: ₱${Number(it.cost_per_unit || 0).toFixed(4)}/${it.unit || ''}`
-                : `Stock: ${qty} pcs  •  Reorder level: ${level}`;
+                : `Stock: ${qty} pcs  •  Reorder level: ${level}${it.variants ? `  •  Variants: ${it.variants}` : ''}`;
             return (
               <InventoryCard
                 key={it.id}

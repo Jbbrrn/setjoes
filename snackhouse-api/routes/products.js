@@ -5,7 +5,11 @@ const {
   updateProduct,
   deleteProduct,
   getRecipe,
-  saveRecipe
+  saveRecipe,
+  listVariants,
+  createVariant,
+  updateVariant,
+  deleteVariant
 } = require('../controllers/productsController');
 const { authenticateToken, requireManager } = require('../middleware/auth');
 
@@ -21,6 +25,11 @@ router.post('/', authenticateToken, requireManager, createProduct);
 router.put('/:id', authenticateToken, requireManager, updateProduct);
 
 router.delete('/:id', authenticateToken, requireManager, deleteProduct);
+
+router.get('/:id/variants', authenticateToken, requireManager, listVariants);
+router.post('/:id/variants', authenticateToken, requireManager, createVariant);
+router.put('/:id/variants/:variantId', authenticateToken, requireManager, updateVariant);
+router.delete('/:id/variants/:variantId', authenticateToken, requireManager, deleteVariant);
 
 // minimal activate/deactivate for manager UI
 router.post('/:id/toggle-active', authenticateToken, requireManager, async (req, res) => {

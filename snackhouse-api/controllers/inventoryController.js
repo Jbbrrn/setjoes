@@ -36,7 +36,13 @@ exports.getFinishedGoods = async (req, res) => {
               p.name,
               p.base_price,
               COALESCE(inv.quantity, 0) AS quantity,
-              COALESCE(inv.reorder_level, 10) AS reorder_level
+              COALESCE(inv.reorder_level, 10) AS reorder_level,
+              (
+                SELECT GROUP_CONCAT(v.variant_name ORDER BY v.id SEPARATOR ', ')
+                FROM product_variants v
+                WHERE v.product_id = p.id
+                  AND (v.is_active = 1 OR v.is_active IS NULL)
+              ) AS variants
        FROM products p
        LEFT JOIN inventory inv ON inv.product_id = p.id
        WHERE p.product_type = 'finished-goods'

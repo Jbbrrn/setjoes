@@ -31,9 +31,19 @@ export const products = {
   create: (data) => api.post('/products', data),
   update: (id, data) => api.put(`/products/${id}`, data),
   remove: (id) => api.delete(`/products/${id}`),
-  getRecipe: (id) => api.get(`/products/${id}/recipe`),
-  saveRecipe: (id, data) => api.put(`/products/${id}/recipe`, data),
-  toggleActive: (id) => api.post(`/products/${id}/toggle-active`)
+  getRecipe: (id, options = {}) =>
+    api.get(`/products/${id}/recipe`, {
+      params: options.variant_id ? { variant_id: options.variant_id } : undefined
+    }),
+  saveRecipe: (id, data, options = {}) =>
+    api.put(`/products/${id}/recipe`, data, {
+      params: options.variant_id ? { variant_id: options.variant_id } : undefined
+    }),
+  toggleActive: (id) => api.post(`/products/${id}/toggle-active`),
+  listVariants: (id) => api.get(`/products/${id}/variants`),
+  createVariant: (id, data) => api.post(`/products/${id}/variants`, data),
+  updateVariant: (id, variantId, data) => api.put(`/products/${id}/variants/${variantId}`, data),
+  removeVariant: (id, variantId) => api.delete(`/products/${id}/variants/${variantId}`)
 };
 
 export const orders = {
