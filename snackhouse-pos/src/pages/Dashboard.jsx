@@ -132,10 +132,12 @@ export default function Dashboard() {
           <div className="card" style={{ padding: 16 }}>
             <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 8 }}>Today's Sales Summary</div>
             <div style={{ opacity: 0.9, lineHeight: 1.6 }}>
-              Today, the store has recorded <strong>{Number(summary?.total_orders || 0)}</strong>{' '}
-              {Number(summary?.total_orders || 0) === 1 ? 'order' : 'orders'} with total sales of{' '}
-              <strong>{formatPHP(summary?.total_sales || 0)}</strong>. The average order value is{' '}
-              <strong>{formatPHP(summary?.avg_order || 0)}</strong>.
+              For this period: <strong>{Number(summary?.total_orders || 0)}</strong>{' '}
+              {Number(summary?.total_orders || 0) === 1 ? 'order' : 'orders'},{' '}
+              <strong>{formatPHP(summary?.total_sales || 0)}</strong> in sales,{' '}
+              <strong>{formatPHP(summary?.total_cost || 0)}</strong> estimated cost of goods,{' '}
+              <strong>{formatPHP(summary?.gross_profit ?? (Number(summary?.total_sales || 0) - Number(summary?.total_cost || 0)))}</strong>{' '}
+              gross profit. Average order: <strong>{formatPHP(summary?.avg_order || 0)}</strong>.
             </div>
           </div>
           <div className="two-col-grid">

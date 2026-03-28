@@ -20,6 +20,7 @@ export default function Menu() {
     name: '',
     category_id: 1,
     base_price: '',
+    cost_price: '',
     product_type: 'made-to-order',
     image_url: ''
   });
@@ -75,6 +76,21 @@ export default function Menu() {
     });
   }, [products, query]);
 
+  const recipePreviewCost = useMemo(() => {
+    if (!recipeOpen || !recipeProduct || recipeProduct.product_type !== 'made-to-order') return null;
+    let sum = 0;
+    let any = false;
+    for (const it of recipeItems) {
+      const ing = ingredients.find((i) => i.id === Number(it.ingredient_id));
+      const qty = Number(it.quantity);
+      if (ing && qty > 0 && Number.isFinite(Number(ing.cost_per_unit))) {
+        sum += qty * Number(ing.cost_per_unit);
+        any = true;
+      }
+    }
+    return any ? Math.round(sum * 100) / 100 : null;
+  }, [recipeOpen, recipeProduct, recipeItems, ingredients]);
+
   const toggleActive = async (p) => {
     try {
       setError('');
@@ -95,6 +111,7 @@ export default function Menu() {
       name: '',
       category_id: categories[0]?.id || 1,
       base_price: '',
+      cost_price: '',
       product_type: 'made-to-order',
       image_url: ''
     });
@@ -111,6 +128,10 @@ export default function Menu() {
       name: p.name || '',
       category_id: p.category_id,
       base_price: String(p.base_price ?? ''),
+      cost_price:
+        p.product_type === 'finished-goods' && p.cost_price != null && p.cost_price !== ''
+          ? String(p.cost_price)
+          : '',
       product_type: p.product_type || 'made-to-order',
       image_url: p.image_url || ''
     });
@@ -147,6 +168,18 @@ export default function Menu() {
         product_type: form.product_type,
         image_url: form.image_url || null
       };
+      if (form.product_type === 'finished-goods') {
+        const cp = String(form.cost_price ?? '').trim();
+        if (cp !== '') {
+          if (!Number.isFinite(Number(form.cost_price)) || Number(form.cost_price) < 0) {
+            setError('Cost price must be ≥ 0, or leave blank.');
+            return;
+          }
+          payload.cost_price = Number(form.cost_price);
+        } else if (editing) {
+          payload.cost_price = null;
+        }
+      }
       if (editing) await api.products.update(editing.id, payload);
       else await api.products.create(payload);
       setOpen(false);
@@ -213,6 +246,7 @@ export default function Menu() {
         { variant_id: recipeVariantId || undefined }
       );
       setRecipeOpen(false);
+      await refresh();
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to save recipe');
     }
@@ -369,11 +403,42 @@ export default function Menu() {
               </option>
             ))}
           </select>
-          <select className="input" value={form.product_type} onChange={(e) => setForm((p) => ({ ...p, product_type: e.target.value }))}>
+          <select
+            className="input"
+            value={form.product_type}
+            onChange={(e) =>
+              setForm((p) => ({
+                ...p,
+                product_type: e.target.value,
+                cost_price: e.target.value === 'finished-goods' ? p.cost_price || '' : ''
+              }))
+            }
+          >
             <option value="made-to-order">made-to-order</option>
             <option value="finished-goods">finished-goods</option>
           </select>
-          <Input type="number" placeholder="Base price" value={form.base_price} onChange={(e) => setForm((p) => ({ ...p, base_price: e.target.value }))} />
+          <Input type="number" placeholder="Base price (what customers pay)" value={form.base_price} onChange={(e) => setForm((p) => ({ ...p, base_price: e.target.value }))} />
+          {form.product_type === 'finished-goods' ? (
+            <Input
+              type="number"
+              placeholder="Cost price (optional — for your margin vs base price)"
+              value={form.cost_price}
+              onChange={(e) => setForm((p) => ({ ...p, cost_price: e.target.value }))}
+            />
+          ) : editing ? (
+            <div className="card" style={{ padding: 10, fontSize: 13, opacity: 0.9 }}>
+              <strong>Cost price</strong> is calculated from the default recipe (ingredient qty × cost per unit). Edit the recipe to change it.
+              {editing.cost_price != null ? (
+                <div style={{ marginTop: 6 }}>Current (default recipe): ₱{Number(editing.cost_price).toFixed(2)}</div>
+              ) : (
+                <div style={{ marginTop: 6 }}>No default recipe yet — add ingredients in Recipe (base product, not a variant-only recipe).</div>
+              )}
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 10, fontSize: 13, opacity: 0.9 }}>
+              After you create this product, open <strong>Recipe</strong> to add ingredients. Cost price will be calculated automatically.
+            </div>
+          )}
           <Input
             placeholder="Image URL (optional)"
             value={form.image_url.startsWith('data:') ? '' : form.image_url}
@@ -392,7 +457,12 @@ export default function Menu() {
             </Button>
           </div>
 
-          {editing ? (
+          {form.product_type === 'finished-goods' ? (
+            <div className="card" style={{ padding: 12, opacity: 0.9, fontSize: 13 }}>
+              <strong>Finished goods</strong> use <strong>base price</strong> only (no variants). Use a separate product per SKU so
+              cost and inventory stay accurate.
+            </div>
+          ) : editing ? (
             <div className="card" style={{ padding: 12 }}>
               <div style={{ fontWeight: 800, marginBottom: 8 }}>Product Variants</div>
               {(variants || []).length === 0 ? (
@@ -479,6 +549,13 @@ export default function Menu() {
           <div className="error-text">Only made-to-order products use ingredient recipes.</div>
         ) : (
           <div style={{ display: 'grid', gap: 10 }}>
+            <div className="card" style={{ padding: 10, fontSize: 13 }}>
+              <strong>Estimated cost (this recipe)</strong>:{' '}
+              {recipePreviewCost != null ? `₱${recipePreviewCost.toFixed(2)}` : '—'}
+              <div style={{ marginTop: 6, opacity: 0.85 }}>
+                Uses each ingredient’s cost per unit × quantity. The product list uses the <em>default</em> recipe (no variant) for made-to-order cost when stock is computed.
+              </div>
+            </div>
             {recipeProduct?.has_variants ? (
               <select
                 className="input"
@@ -549,98 +626,146 @@ export default function Menu() {
 
       <Modal
         open={variantsOpen}
-        title={variantsProduct ? `Variants: ${variantsProduct.name}` : 'Variants'}
+        title={
+          variantsProduct?.product_type === 'finished-goods'
+            ? `Remove variants: ${variantsProduct?.name || ''}`
+            : variantsProduct
+              ? `Variants: ${variantsProduct.name}`
+              : 'Variants'
+        }
         onClose={() => setVariantsOpen(false)}
       >
         <div style={{ display: 'grid', gap: 12 }}>
           {variantError ? <div className="card error-text">{variantError}</div> : null}
-          <div style={{ fontSize: 13, opacity: 0.85 }}>
-            Add pricing variants like “B1T1 + Cheese” so POS can prompt for a selection.
-          </div>
-
-          {(variants || []).length === 0 ? (
-            <div style={{ opacity: 0.8 }}>No variants yet.</div>
+          {variantsProduct?.product_type === 'finished-goods' ? (
+            <>
+              <div style={{ fontSize: 13, opacity: 0.9 }}>
+                Finished goods should use <strong>base price</strong> only. Delete each row below so POS uses one price and one
+                COGS. You cannot add new variants for finished goods.
+              </div>
+              {(variants || []).length === 0 ? (
+                <div style={{ opacity: 0.8 }}>No variants left.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {variants.map((v) => (
+                    <div
+                      key={v.id}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 10,
+                        padding: 10,
+                        border: '1px solid #E2E8F0',
+                        borderRadius: 12
+                      }}
+                    >
+                      <div>
+                        <div style={{ fontWeight: 800 }}>{v.variant_name}</div>
+                        <div style={{ opacity: 0.85, fontSize: 13 }}>₱{Number(v.price).toFixed(2)}</div>
+                      </div>
+                      <Button className="btn-danger" onClick={() => deleteVariant(v.id)}>
+                        Delete
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <Button className="btn-secondary" style={{ width: '100%' }} onClick={() => setVariantsOpen(false)}>
+                Close
+              </Button>
+            </>
           ) : (
-            <div style={{ display: 'grid', gap: 8 }}>
-              {variants.map((v) => (
-                <div
-                  key={v.id}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1.5fr 1fr auto auto',
-                    gap: 8,
-                    alignItems: 'center'
-                  }}
-                >
+            <>
+              <div style={{ fontSize: 13, opacity: 0.85 }}>
+                Add pricing variants like “B1T1 + Cheese” so POS can prompt for a selection.
+              </div>
+
+              {(variants || []).length === 0 ? (
+                <div style={{ opacity: 0.8 }}>No variants yet.</div>
+              ) : (
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {variants.map((v) => (
+                    <div
+                      key={v.id}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1.5fr 1fr auto auto',
+                        gap: 8,
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Input
+                        value={v.variant_name || ''}
+                        onChange={(e) =>
+                          setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, variant_name: e.target.value } : x)))
+                        }
+                      />
+                      <Input
+                        type="number"
+                        value={String(v.price ?? '')}
+                        onChange={(e) =>
+                          setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, price: e.target.value } : x)))
+                        }
+                      />
+                      <Button
+                        className={v.is_active ? 'btn-secondary' : 'btn-primary'}
+                        onClick={() => updateVariant(v.id, { is_active: !v.is_active })}
+                      >
+                        {v.is_active ? 'Active' : 'Inactive'}
+                      </Button>
+                      <Button className="btn-danger" onClick={() => deleteVariant(v.id)}>
+                        Delete
+                      </Button>
+                      <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button
+                          className="btn-secondary"
+                          onClick={() =>
+                            updateVariant(v.id, {
+                              variant_name: v.variant_name,
+                              price: Number(v.price)
+                            })
+                          }
+                        >
+                          Save Changes
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="card" style={{ padding: 12 }}>
+                <div style={{ fontWeight: 800, marginBottom: 8 }}>Add new variant</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 8 }}>
                   <Input
-                    value={v.variant_name || ''}
-                    onChange={(e) =>
-                      setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, variant_name: e.target.value } : x)))
-                    }
+                    placeholder="Variant name (e.g. B1T1 + Cheese)"
+                    value={newVariant.variant_name}
+                    onChange={(e) => setNewVariant((p) => ({ ...p, variant_name: e.target.value }))}
                   />
                   <Input
                     type="number"
-                    value={String(v.price ?? '')}
-                    onChange={(e) =>
-                      setVariants((prev) => prev.map((x) => (x.id === v.id ? { ...x, price: e.target.value } : x)))
-                    }
+                    placeholder="Price (e.g. 120)"
+                    value={newVariant.price}
+                    onChange={(e) => setNewVariant((p) => ({ ...p, price: e.target.value }))}
                   />
-                  <Button
-                    className={v.is_active ? 'btn-secondary' : 'btn-primary'}
-                    onClick={() => updateVariant(v.id, { is_active: !v.is_active })}
-                  >
-                    {v.is_active ? 'Active' : 'Inactive'}
-                  </Button>
-                  <Button className="btn-danger" onClick={() => deleteVariant(v.id)}>
-                    Delete
-                  </Button>
-                  <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
-                    <Button
-                      className="btn-secondary"
-                      onClick={() =>
-                        updateVariant(v.id, {
-                          variant_name: v.variant_name,
-                          price: Number(v.price)
-                        })
-                      }
-                    >
-                      Save Changes
-                    </Button>
-                  </div>
                 </div>
-              ))}
-            </div>
+                <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+                  <Button className="btn-secondary" style={{ flex: 1 }} onClick={() => setVariantsOpen(false)}>
+                    Close
+                  </Button>
+                  <Button
+                    className="btn-primary"
+                    style={{ flex: 1 }}
+                    onClick={addVariant}
+                    disabled={!newVariant.variant_name.trim() || !Number.isFinite(Number(newVariant.price))}
+                  >
+                    Add Variant
+                  </Button>
+                </div>
+              </div>
+            </>
           )}
-
-          <div className="card" style={{ padding: 12 }}>
-            <div style={{ fontWeight: 800, marginBottom: 8 }}>Add new variant</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 8 }}>
-              <Input
-                placeholder="Variant name (e.g. B1T1 + Cheese)"
-                value={newVariant.variant_name}
-                onChange={(e) => setNewVariant((p) => ({ ...p, variant_name: e.target.value }))}
-              />
-              <Input
-                type="number"
-                placeholder="Price (e.g. 120)"
-                value={newVariant.price}
-                onChange={(e) => setNewVariant((p) => ({ ...p, price: e.target.value }))}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
-              <Button className="btn-secondary" style={{ flex: 1 }} onClick={() => setVariantsOpen(false)}>
-                Close
-              </Button>
-              <Button
-                className="btn-primary"
-                style={{ flex: 1 }}
-                onClick={addVariant}
-                disabled={!newVariant.variant_name.trim() || !Number.isFinite(Number(newVariant.price))}
-              >
-                Add Variant
-              </Button>
-            </div>
-          </div>
         </div>
       </Modal>
 

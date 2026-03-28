@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { syncMadeToOrderCachesForIngredient } = require('../utils/productCost');
 
 const toNum = (v, fallback = null) => {
   const n = Number(v);
@@ -35,6 +36,7 @@ exports.getFinishedGoods = async (req, res) => {
       `SELECT p.id,
               p.name,
               p.base_price,
+              p.cost_price,
               COALESCE(inv.quantity, 0) AS quantity,
               COALESCE(inv.reorder_level, 10) AS reorder_level,
               (
@@ -49,7 +51,15 @@ exports.getFinishedGoods = async (req, res) => {
        AND p.is_active = 1
        ORDER BY p.name ASC`
     );
-    return res.json(rows);
+    return res.json(
+      rows.map((r) => ({
+        ...r,
+        base_price: Number(r.base_price),
+        cost_price: r.cost_price != null && r.cost_price !== '' ? Number(r.cost_price) : null,
+        quantity: Number(r.quantity),
+        reorder_level: Number(r.reorder_level)
+      }))
+    );
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('getFinishedGoods error:', err);
@@ -327,6 +337,9 @@ exports.updateIngredient = async (req, res) => {
     }
 
     await connection.commit();
+    if (cost_per_unit !== undefined) {
+      await syncMadeToOrderCachesForIngredient(connection, id);
+    }
     return res.json({ ok: true });
   } catch (err) {
     await connection.rollback();

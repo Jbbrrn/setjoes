@@ -88,7 +88,9 @@ export default function POS() {
   };
 
   const handleProductClick = (product) => {
-    if (product.has_variants && (product.variants || []).length > 0) {
+    const useVariants =
+      product.product_type !== 'finished-goods' && product.has_variants && (product.variants || []).length > 0;
+    if (useVariants) {
       setVariantProduct(product);
       setSelectedVariantId(product.variants[0]?.id || null);
       return;

@@ -1,4 +1,9 @@
 const db = require('../config/database');
+const {
+  getUnitCostForSaleLine,
+  getRecipeIdForSaleLine,
+  roundMoney: roundCostMoney
+} = require('../utils/productCost');
 
 const toMoney = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
 class BadRequestError extends Error {}
@@ -55,7 +60,7 @@ exports.createOrder = async (req, res) => {
 
     for (const item of items) {
       const [productRows] = await connection.query(
-        'SELECT id, name, base_price, product_type, has_variants FROM products WHERE id = ? AND is_active = 1',
+        'SELECT id, name, base_price, cost_price, product_type, has_variants FROM products WHERE id = ? AND is_active = 1',
         [item.product_id]
       );
       if (!productRows.length) throw new Error(`Product ${item.product_id} not found`);
@@ -77,6 +82,16 @@ exports.createOrder = async (req, res) => {
       const lineSubtotal = toMoney(unit_price * item.quantity);
       subtotal = toMoney(subtotal + lineSubtotal);
 
+      const variantIdForCost = item.variant_id != null ? Number(item.variant_id) : null;
+      const unit_cost = await getUnitCostForSaleLine(connection, {
+        product_id: product.id,
+        product_type: product.product_type,
+        variant_id: variantIdForCost,
+        cost_price: product.cost_price
+      });
+      const cost_subtotal =
+        unit_cost != null ? roundCostMoney(unit_cost * item.quantity) : null;
+
       resolvedItems.push({
         product_id: item.product_id,
         product_name: product.name,
@@ -85,7 +100,9 @@ exports.createOrder = async (req, res) => {
         variant_name,
         quantity: item.quantity,
         unit_price: toMoney(unit_price),
-        subtotal: lineSubtotal
+        subtotal: lineSubtotal,
+        unit_cost,
+        cost_subtotal
       });
     }
 
@@ -115,9 +132,18 @@ exports.createOrder = async (req, res) => {
     // Insert order items + inventory deductions
     for (const it of resolvedItems) {
       await connection.query(
-        `INSERT INTO order_items (order_id, product_id, variant_id, quantity, unit_price, subtotal)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        [order_id, it.product_id, it.variant_id, it.quantity, it.unit_price, it.subtotal]
+        `INSERT INTO order_items (order_id, product_id, variant_id, quantity, unit_price, subtotal, unit_cost, cost_subtotal)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          order_id,
+          it.product_id,
+          it.variant_id,
+          it.quantity,
+          it.unit_price,
+          it.subtotal,
+          it.unit_cost,
+          it.cost_subtotal
+        ]
       );
 
       if (it.product_type === 'finished-goods') {
@@ -145,23 +171,16 @@ exports.createOrder = async (req, res) => {
           [it.product_id, -it.quantity, before, after, order_id, employee_id]
         );
       } else {
-        // recipe match: prefer variant-specific, else NULL variant recipe
-        const [recipeRows] = await connection.query(
-          `SELECT r.id
-           FROM recipes r
-           WHERE r.product_id = ?
-             AND (r.variant_id = ? OR r.variant_id IS NULL)
-           ORDER BY (r.variant_id IS NULL) ASC
-           LIMIT 1`,
-          [it.product_id, it.variant_id]
+        const recipe_id = await getRecipeIdForSaleLine(
+          connection,
+          it.product_id,
+          it.variant_id != null ? Number(it.variant_id) : null
         );
-        if (!recipeRows.length) {
+        if (!recipe_id) {
           throw new BadRequestError(
             `Cannot sell ${it.product_name}: made-to-order product has no recipe configured.`
           );
         }
-
-        const recipe_id = recipeRows[0].id;
         const [recipeItems] = await connection.query(
           'SELECT ingredient_id, quantity FROM recipe_items WHERE recipe_id = ?',
           [recipe_id]

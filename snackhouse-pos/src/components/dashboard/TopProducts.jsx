@@ -27,9 +27,20 @@ export default function TopProducts({ items }) {
                   {idx + 1}. {it.product_name}
                 </div>
                 <div style={{ opacity: 0.85, marginTop: 2 }}>{it.quantity_sold} sold</div>
+                <div style={{ opacity: 0.8, marginTop: 4, fontSize: 12 }}>
+                  Cost {formatPHP(it.total_cost ?? 0)} · Profit{' '}
+                  {formatPHP(
+                    it.gross_profit != null
+                      ? it.gross_profit
+                      : Number(it.revenue || 0) - Number(it.total_cost || 0)
+                  )}
+                </div>
               </div>
-              <div className="pink-text" style={{ fontWeight: 900 }}>
-                {formatPHP(it.revenue)}
+              <div style={{ textAlign: 'right' }}>
+                <div className="pink-text" style={{ fontWeight: 900 }}>
+                  {formatPHP(it.revenue)}
+                </div>
+                <div style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>revenue</div>
               </div>
             </div>
           ))}

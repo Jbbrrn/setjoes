@@ -1,6 +1,8 @@
 const db = require('../config/database');
 const PH_TZ = 'Asia/Manila';
 
+const roundMoney = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+
 const parseDate = (s) => {
   if (!s) return null;
   const value = String(s).trim();
@@ -60,15 +62,29 @@ exports.getSummary = async (req, res) => {
     const params = date ? [date] : [startDate, endDate];
     const [rows] = await connection.query(
       `SELECT
-         COALESCE(SUM(total_amount), 0) AS total_sales,
-         COALESCE(COUNT(*), 0) AS total_orders,
-         COALESCE(AVG(total_amount), 0) AS avg_order
-       FROM orders
-       WHERE ${whereClause} AND status = 'completed'`,
+         COALESCE(SUM(o.total_amount), 0) AS total_sales,
+         COALESCE(SUM(COALESCE(agg.line_cost, 0)), 0) AS total_cost,
+         COALESCE(COUNT(DISTINCT o.id), 0) AS total_orders,
+         COALESCE(AVG(o.total_amount), 0) AS avg_order
+       FROM orders o
+       LEFT JOIN (
+         SELECT order_id, SUM(COALESCE(cost_subtotal, 0)) AS line_cost
+         FROM order_items
+         GROUP BY order_id
+       ) agg ON agg.order_id = o.id
+       WHERE ${whereClause.replace(/created_at/g, 'o.created_at')} AND o.status = 'completed'`,
       params
     );
 
-    return res.json(rows[0]);
+    const r = rows[0];
+    const total_sales = Number(r.total_sales);
+    const total_cost = Number(r.total_cost);
+    return res.json({
+      ...r,
+      total_sales,
+      total_cost,
+      gross_profit: roundMoney(total_sales - total_cost)
+    });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('getSummary error:', err);
@@ -121,7 +137,9 @@ exports.getTopProducts = async (req, res) => {
       `SELECT
          p.name AS product_name,
          SUM(oi.quantity) AS quantity_sold,
-         SUM(oi.subtotal) AS revenue
+         SUM(oi.subtotal) AS revenue,
+         COALESCE(SUM(oi.cost_subtotal), 0) AS total_cost,
+         SUM(oi.subtotal) - COALESCE(SUM(oi.cost_subtotal), 0) AS gross_profit
        FROM orders o
        JOIN order_items oi ON oi.order_id = o.id
        JOIN products p ON p.id = oi.product_id
@@ -131,7 +149,13 @@ exports.getTopProducts = async (req, res) => {
        LIMIT ?`,
       params
     );
-    return res.json({ items: rows });
+    const items = rows.map((row) => ({
+      ...row,
+      revenue: Number(row.revenue),
+      total_cost: Number(row.total_cost),
+      gross_profit: roundMoney(Number(row.gross_profit))
+    }));
+    return res.json({ items });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('getTopProducts error:', err);

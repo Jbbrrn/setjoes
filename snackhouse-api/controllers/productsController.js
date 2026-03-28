@@ -1,4 +1,10 @@
 const db = require('../config/database');
+const {
+  roundMoney,
+  sumRecipeCost,
+  getMadeToOrderCostDefaultRecipe,
+  syncMadeToOrderCostPriceCache
+} = require('../utils/productCost');
 
 const ensureFinishedGoodsInventory = async (connection, productId) => {
   await connection.query(
@@ -17,7 +23,7 @@ exports.getProducts = async (req, res) => {
     const canSeeInactive = req.employee && req.employee.role === 'manager' && includeInactive;
     const activeFilter = canSeeInactive ? '' : 'WHERE p.is_active = 1';
     const [rows] = await connection.query(
-      `SELECT p.id, p.name, p.category_id, p.base_price, p.product_type, p.has_variants, p.is_active, p.image_url,
+      `SELECT p.id, p.name, p.category_id, p.base_price, p.cost_price, p.product_type, p.has_variants, p.is_active, p.image_url,
               c.name AS category_name, c.display_order
        FROM products p
        JOIN categories c ON c.id = p.category_id
@@ -102,12 +108,18 @@ exports.getProducts = async (req, res) => {
         }
       }
 
+      let cost_price = r.cost_price != null && r.cost_price !== '' ? roundMoney(r.cost_price) : null;
+      if (r.product_type === 'made-to-order') {
+        cost_price = await getMadeToOrderCostDefaultRecipe(connection, r.id);
+      }
+
       products.push({
       id: r.id,
       name: r.name,
       category_id: r.category_id,
       category_name: r.category_name,
-      base_price: r.base_price,
+      base_price: Number(r.base_price),
+      cost_price,
       product_type: r.product_type,
       has_variants: !!r.has_variants,
       is_active: !!r.is_active,
@@ -129,12 +141,20 @@ exports.getProducts = async (req, res) => {
 };
 
 exports.createProduct = async (req, res) => {
-  const { name, category_id, base_price, product_type, image_url } = req.body || {};
+  const { name, category_id, base_price, product_type, image_url, cost_price } = req.body || {};
   if (!name || typeof name !== 'string') return res.status(400).json({ error: 'Invalid name' });
   if (!Number.isFinite(Number(category_id))) return res.status(400).json({ error: 'Invalid category_id' });
   if (!Number.isFinite(Number(base_price))) return res.status(400).json({ error: 'Invalid base_price' });
   if (!['made-to-order', 'finished-goods'].includes(product_type)) {
     return res.status(400).json({ error: 'Invalid product_type' });
+  }
+
+  let costPriceVal = null;
+  if (product_type === 'finished-goods' && cost_price !== undefined && cost_price !== null && cost_price !== '') {
+    if (!Number.isFinite(Number(cost_price)) || Number(cost_price) < 0) {
+      return res.status(400).json({ error: 'Invalid cost_price (must be >= 0)' });
+    }
+    costPriceVal = roundMoney(cost_price);
   }
 
   const connection = await db.getConnection();
@@ -149,9 +169,17 @@ exports.createProduct = async (req, res) => {
     }
 
     const [result] = await connection.query(
-      `INSERT INTO products (name, category_id, base_price, product_type, has_variants, is_active, image_url)
-       VALUES (?, ?, ?, ?, 0, ?, ?)`,
-      [normalizedName, Number(category_id), Number(base_price), product_type, product_type === 'made-to-order' ? 0 : 1, image_url || null]
+      `INSERT INTO products (name, category_id, base_price, cost_price, product_type, has_variants, is_active, image_url)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?)`,
+      [
+        normalizedName,
+        Number(category_id),
+        Number(base_price),
+        costPriceVal,
+        product_type,
+        product_type === 'made-to-order' ? 0 : 1,
+        image_url || null
+      ]
     );
     if (product_type === 'finished-goods') {
       await ensureFinishedGoodsInventory(connection, result.insertId);
@@ -169,7 +197,10 @@ exports.createProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'Invalid id' });
-  const { name, category_id, base_price, product_type, image_url } = req.body || {};
+  const { name, category_id, base_price, product_type, image_url, cost_price } = req.body || {};
+
+  const clearCostWhenSwitchingToMadeToOrder =
+    product_type !== undefined && product_type === 'made-to-order' && cost_price === undefined;
 
   const fields = [];
   const values = [];
@@ -188,6 +219,18 @@ exports.updateProduct = async (req, res) => {
     fields.push('base_price = ?');
     values.push(Number(base_price));
   }
+  if (cost_price !== undefined) {
+    if (cost_price === null || cost_price === '') {
+      fields.push('cost_price = ?');
+      values.push(null);
+    } else {
+      if (!Number.isFinite(Number(cost_price)) || Number(cost_price) < 0) {
+        return res.status(400).json({ error: 'Invalid cost_price' });
+      }
+      fields.push('cost_price = ?');
+      values.push(roundMoney(cost_price));
+    }
+  }
   if (product_type !== undefined) {
     if (!['made-to-order', 'finished-goods'].includes(product_type)) {
       return res.status(400).json({ error: 'Invalid product_type' });
@@ -203,6 +246,22 @@ exports.updateProduct = async (req, res) => {
 
   const connection = await db.getConnection();
   try {
+    if (cost_price !== undefined || product_type !== undefined || clearCostWhenSwitchingToMadeToOrder) {
+      const [typeRows] = await connection.query('SELECT product_type FROM products WHERE id = ? LIMIT 1', [id]);
+      if (!typeRows.length) {
+        return res.status(404).json({ error: 'Not found' });
+      }
+      const existingType = typeRows[0].product_type;
+      const effectiveType = product_type !== undefined ? product_type : existingType;
+      if (cost_price !== undefined && effectiveType === 'made-to-order') {
+        return res.status(400).json({ error: 'Cost price for made-to-order products is calculated from the recipe.' });
+      }
+      if (clearCostWhenSwitchingToMadeToOrder && existingType === 'finished-goods') {
+        fields.push('cost_price = ?');
+        values.push(null);
+      }
+    }
+
     if (name !== undefined) {
       const normalizedName = String(name).trim();
       const [dupRows] = await connection.query(
@@ -319,18 +378,19 @@ exports.getRecipe = async (req, res) => {
        LIMIT 1`,
       [productId, hasVariantFilter ? 1 : 0, variantId, hasVariantFilter ? 1 : 0]
     );
-    if (!recipeRows.length) return res.json({ recipe: null, items: [] });
+    if (!recipeRows.length) return res.json({ recipe: null, items: [], computed_cost: null });
 
     const recipe = recipeRows[0];
     const [items] = await connection.query(
-      `SELECT ri.id, ri.ingredient_id, i.name AS ingredient_name, i.unit, ri.quantity
+      `SELECT ri.id, ri.ingredient_id, i.name AS ingredient_name, i.unit, i.cost_per_unit, ri.quantity
        FROM recipe_items ri
        JOIN ingredients i ON i.id = ri.ingredient_id
        WHERE ri.recipe_id = ?
        ORDER BY i.name ASC`,
       [recipe.id]
     );
-    return res.json({ recipe, items });
+    const computed_cost = await sumRecipeCost(connection, recipe.id);
+    return res.json({ recipe, items, computed_cost });
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('getRecipe error:', err);
@@ -426,7 +486,11 @@ exports.saveRecipe = async (req, res) => {
     }
 
     await connection.commit();
-    return res.json({ ok: true, recipe_id: recipeId });
+    if (!hasVariantFilter) {
+      await syncMadeToOrderCostPriceCache(connection, productId);
+    }
+    const computed_cost = await sumRecipeCost(connection, recipeId);
+    return res.json({ ok: true, recipe_id: recipeId, computed_cost });
   } catch (err) {
     await connection.rollback();
     // eslint-disable-next-line no-console
@@ -469,10 +533,19 @@ exports.createVariant = async (req, res) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
-    const [productRows] = await connection.query('SELECT id FROM products WHERE id = ? LIMIT 1', [productId]);
+    const [productRows] = await connection.query(
+      'SELECT id, product_type FROM products WHERE id = ? LIMIT 1',
+      [productId]
+    );
     if (!productRows.length) {
       await connection.rollback();
       return res.status(404).json({ error: 'Product not found' });
+    }
+    if (productRows[0].product_type === 'finished-goods') {
+      await connection.rollback();
+      return res.status(400).json({
+        error: 'Finished goods use base price only — create a separate product per SKU instead of variants.'
+      });
     }
 
     const name = variant_name.trim();
@@ -533,6 +606,21 @@ exports.updateVariant = async (req, res) => {
   const connection = await db.getConnection();
   try {
     await connection.beginTransaction();
+    const [ptypeRows] = await connection.query(
+      'SELECT product_type FROM products WHERE id = ? LIMIT 1',
+      [productId]
+    );
+    if (!ptypeRows.length) {
+      await connection.rollback();
+      return res.status(404).json({ error: 'Product not found' });
+    }
+    if (ptypeRows[0].product_type === 'finished-goods') {
+      await connection.rollback();
+      return res.status(400).json({
+        error: 'Finished goods cannot use variants. Delete this variant to use base price only, or remove variants from Menu.'
+      });
+    }
+
     if (variant_name !== undefined) {
       const name = String(variant_name).trim();
       const [dupRows] = await connection.query(

@@ -216,7 +216,11 @@ export default function Inventory() {
             const subtitle =
               tab === 'ingredients'
                 ? `Stock: ${qty}${it.unit || ''} / ${cap || '—'}${it.unit || ''}  •  Cost: ₱${Number(it.cost_per_unit || 0).toFixed(4)}/${it.unit || ''}`
-                : `Stock: ${qty} pcs  •  Reorder level: ${level}${it.variants ? `  •  Variants: ${it.variants}` : ''}`;
+                : `Stock: ${qty} pcs  •  Reorder level: ${level}${
+                    it.cost_price != null && it.cost_price !== ''
+                      ? `  •  Cost: ₱${Number(it.cost_price).toFixed(2)}`
+                      : ''
+                  }  •  Price: ₱${Number(it.base_price || 0).toFixed(2)}${it.variants ? `  •  Variants: ${it.variants}` : ''}`;
             return (
               <InventoryCard
                 key={it.id}

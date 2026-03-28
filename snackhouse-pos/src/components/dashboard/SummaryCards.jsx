@@ -3,6 +3,8 @@ import { formatPHP } from '../../utils/formatters';
 
 export default function SummaryCards({ summary }) {
   const totalSales = Number(summary?.total_sales || 0);
+  const totalCost = Number(summary?.total_cost || 0);
+  const grossProfit = Number(summary?.gross_profit ?? totalSales - totalCost);
   const totalOrders = Number(summary?.total_orders || 0);
   const avgOrder = Number(summary?.avg_order || 0);
 
@@ -18,19 +20,35 @@ export default function SummaryCards({ summary }) {
   const valueStyle = { fontSize: 28, fontWeight: 900 };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 14 }}>
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+        gap: 14
+      }}
+    >
       <div style={cardStyle}>
-        <div style={labelStyle}>Today Sales</div>
+        <div style={labelStyle}>Sales (revenue)</div>
         <div style={{ ...valueStyle }} className="pink-text">
           {formatPHP(totalSales)}
         </div>
       </div>
       <div style={cardStyle}>
-        <div style={labelStyle}>Total Orders</div>
+        <div style={labelStyle}>Cost of sales</div>
+        <div style={valueStyle}>{formatPHP(totalCost)}</div>
+      </div>
+      <div style={cardStyle}>
+        <div style={labelStyle}>Gross profit</div>
+        <div style={{ ...valueStyle }} className="pink-text">
+          {formatPHP(grossProfit)}
+        </div>
+      </div>
+      <div style={cardStyle}>
+        <div style={labelStyle}>Total orders</div>
         <div style={valueStyle}>{totalOrders}</div>
       </div>
       <div style={cardStyle}>
-        <div style={labelStyle}>Avg Order</div>
+        <div style={labelStyle}>Avg order</div>
         <div style={{ ...valueStyle }} className="pink-text">
           {formatPHP(avgOrder)}
         </div>

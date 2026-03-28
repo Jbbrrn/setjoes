@@ -13,6 +13,9 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
     <div style={{ display: 'grid', gap: 12 }}>
       {(products || []).map((p) => {
         const isActive = toIsActive(p.is_active);
+        const isFinished = p.product_type === 'finished-goods';
+        const showRecipe = !isFinished;
+        const showVariants = !isFinished || p.has_variants;
         return (
         <div
           key={p.id}
@@ -40,19 +43,36 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
                 </span>
               </div>
               <div style={{ opacity: 0.8, marginTop: 4 }}>
-                Category: {p.category_name}  •  Base Price: ₱{Number(p.base_price).toFixed(2)}  •  Type: {p.product_type}
+                Category: {p.category_name}  •  Price (base): ₱{Number(p.base_price).toFixed(2)}  •  Type: {p.product_type}
               </div>
               <div style={{ opacity: 0.8, marginTop: 4 }}>
-                Variants: {p.has_variants ? (p.variants || []).map((v) => `${v.variant_name} (₱${Number(v.price).toFixed(2)})`).join(', ') || '—' : 'None'}
+                Cost: {p.cost_price != null && p.cost_price !== '' ? `₱${Number(p.cost_price).toFixed(2)}` : '—'}
+                {p.product_type === 'made-to-order' ? ' (from recipe)' : ''}
               </div>
+              {!isFinished ? (
+                <div style={{ opacity: 0.8, marginTop: 4 }}>
+                  Variants:{' '}
+                  {p.has_variants
+                    ? (p.variants || []).map((v) => `${v.variant_name} (₱${Number(v.price).toFixed(2)})`).join(', ') || '—'
+                    : 'None'}
+                </div>
+              ) : p.has_variants ? (
+                <div style={{ opacity: 0.85, marginTop: 4, color: '#C05621' }}>
+                  Legacy variants present — open Variants to remove them (finished goods use base price only).
+                </div>
+              ) : null}
             </div>
             <div className="actions-row">
-              <Button className="btn-secondary" onClick={() => onRecipe(p)}>
-                Recipe
-              </Button>
-              <Button className="btn-secondary" onClick={() => onVariants(p)}>
-                Variants
-              </Button>
+              {showRecipe ? (
+                <Button className="btn-secondary" onClick={() => onRecipe(p)}>
+                  Recipe
+                </Button>
+              ) : null}
+              {showVariants ? (
+                <Button className="btn-secondary" onClick={() => onVariants(p)}>
+                  {isFinished && p.has_variants ? 'Remove variants' : 'Variants'}
+                </Button>
+              ) : null}
               <Button className="btn-secondary" onClick={() => onEdit(p)}>
                 Edit
               </Button>
