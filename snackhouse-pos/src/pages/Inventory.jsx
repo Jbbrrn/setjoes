@@ -157,6 +157,9 @@ export default function Inventory() {
           <Button className="btn-secondary" onClick={() => navigate('/dashboard')}>
             Dashboard
           </Button>
+          <Button className="btn-secondary" onClick={() => navigate('/orders')}>
+            Orders
+          </Button>
           <Button className="btn-secondary" onClick={() => navigate('/pos')}>
             POS
           </Button>

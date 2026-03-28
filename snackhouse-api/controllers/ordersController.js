@@ -252,6 +252,111 @@ exports.createOrder = async (req, res) => {
   }
 };
 
+const parseHistoryDate = (s) => {
+  if (!s) return null;
+  const value = String(s).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  return value;
+};
+
+exports.listOrders = async (req, res) => {
+  const role = req.employee?.role;
+  const isManager = role === 'manager';
+  let startDate;
+  let endDate;
+
+  if (isManager) {
+    startDate = parseHistoryDate(req.query.start_date);
+    endDate = parseHistoryDate(req.query.end_date);
+    if (!startDate || !endDate) {
+      return res.status(400).json({ error: 'Provide start_date and end_date (YYYY-MM-DD).' });
+    }
+    if (startDate > endDate) {
+      return res.status(400).json({ error: 'start_date must be on or before end_date.' });
+    }
+  } else {
+    startDate = endDate = getPhDateParts().ymd;
+  }
+
+  const pmRaw = String(req.query.payment_method || 'all').toLowerCase();
+  const paymentFilter = ['cash', 'gcash'].includes(pmRaw) ? pmRaw : 'all';
+
+  const connection = await db.getConnection();
+  try {
+    let sql;
+    let params;
+    if (isManager) {
+      sql = `
+        SELECT o.id, o.order_number, o.created_at, o.total_amount, o.status, o.subtotal,
+               e.full_name AS cashier_name,
+               p.payment_method, p.amount_paid, p.change_given
+        FROM orders o
+        JOIN employees e ON e.id = o.employee_id
+        LEFT JOIN payments p ON p.order_id = o.id
+        WHERE o.created_at >= ? AND o.created_at < DATE_ADD(?, INTERVAL 1 DAY)
+          AND o.status IN ('completed', 'voided')
+          AND (? = 'all' OR IFNULL(p.payment_method, '') = ?)
+        ORDER BY o.created_at DESC, o.id DESC`;
+      params = [startDate, endDate, paymentFilter, paymentFilter];
+    } else {
+      sql = `
+        SELECT o.id, o.order_number, o.created_at, o.total_amount, o.status, o.subtotal,
+               e.full_name AS cashier_name,
+               p.payment_method, p.amount_paid, p.change_given
+        FROM orders o
+        JOIN employees e ON e.id = o.employee_id
+        LEFT JOIN payments p ON p.order_id = o.id
+        WHERE DATE(o.created_at) = ?
+          AND o.status IN ('completed', 'voided')
+          AND (? = 'all' OR IFNULL(p.payment_method, '') = ?)
+        ORDER BY o.created_at DESC, o.id DESC`;
+      params = [startDate, paymentFilter, paymentFilter];
+    }
+
+    const [rows] = await connection.query(sql, params);
+
+    const summary = { total_sales: 0, cash_total: 0, gcash_total: 0, order_count: rows.length };
+    for (const r of rows) {
+      if (r.status !== 'completed') continue;
+      const amt = Number(r.total_amount);
+      summary.total_sales += amt;
+      if (r.payment_method === 'cash') summary.cash_total += amt;
+      if (r.payment_method === 'gcash') summary.gcash_total += amt;
+    }
+    summary.total_sales = toMoney(summary.total_sales);
+    summary.cash_total = toMoney(summary.cash_total);
+    summary.gcash_total = toMoney(summary.gcash_total);
+
+    return res.json({
+      orders: rows.map((r) => ({
+        id: r.id,
+        order_number: r.order_number,
+        created_at: r.created_at,
+        total_amount: Number(r.total_amount),
+        subtotal: Number(r.subtotal),
+        status: r.status,
+        cashier_name: r.cashier_name,
+        payment_method: r.payment_method,
+        amount_paid: r.amount_paid != null ? Number(r.amount_paid) : null,
+        change_given: r.change_given != null ? Number(r.change_given) : null
+      })),
+      summary,
+      meta: {
+        start_date: startDate,
+        end_date: endDate,
+        payment_method: paymentFilter,
+        view: isManager ? 'range' : 'today'
+      }
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('listOrders error:', err);
+    return res.status(500).json({ error: 'Failed to load orders.' });
+  } finally {
+    connection.release();
+  }
+};
+
 exports.voidOrder = async (req, res) => {
   const orderId = Number(req.params.id);
   if (!Number.isFinite(orderId) || orderId <= 0) return res.status(400).json({ error: 'Invalid order id' });

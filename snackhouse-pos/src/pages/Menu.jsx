@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Button from '../components/common/Button';
 import Input from '../components/common/Input';
@@ -33,6 +33,13 @@ export default function Menu() {
   const [categories, setCategories] = useState([]);
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
+  const [categoryFilterId, setCategoryFilterId] = useState(null);
+  const [manageCategoriesOpen, setManageCategoriesOpen] = useState(false);
+  const [categoryRows, setCategoryRows] = useState([]);
+  const categoryRowsRef = useRef([]);
+  const manageCategoriesWasOpen = useRef(false);
+  const [categoryManageError, setCategoryManageError] = useState('');
+  const [categorySavingId, setCategorySavingId] = useState(null);
   const [variantsOpen, setVariantsOpen] = useState(false);
   const [variantsProduct, setVariantsProduct] = useState(null);
   const [variants, setVariants] = useState([]);
@@ -75,6 +82,60 @@ export default function Menu() {
       return String(p.name || '').toLowerCase().includes(q);
     });
   }, [products, query]);
+
+  const reloadCategories = useCallback(async () => {
+    const res = await api.categories.list();
+    setCategories(res.data || []);
+  }, []);
+
+  const catalogSections = useMemo(() => {
+    if (categoryFilterId != null) {
+      const cat = categories.find((c) => Number(c.id) === Number(categoryFilterId));
+      const prods = visible.filter((p) => Number(p.category_id) === Number(categoryFilterId));
+      if (!prods.length) return [];
+      if (!cat) return [{ category: { id: categoryFilterId, name: `Category #${categoryFilterId}` }, products: prods }];
+      return [{ category: cat, products: prods }];
+    }
+    const byCat = new Map();
+    for (const p of visible) {
+      const cid = Number(p.category_id);
+      if (!byCat.has(cid)) byCat.set(cid, []);
+      byCat.get(cid).push(p);
+    }
+    const ordered = [];
+    for (const c of categories) {
+      const prods = byCat.get(Number(c.id));
+      if (prods?.length) ordered.push({ category: c, products: prods });
+    }
+    for (const [cid, prods] of byCat) {
+      if (!categories.some((c) => Number(c.id) === cid)) {
+        ordered.push({ category: { id: cid, name: `Category #${cid}` }, products: prods });
+      }
+    }
+    return ordered;
+  }, [visible, categories, categoryFilterId]);
+
+  useEffect(() => {
+    categoryRowsRef.current = categoryRows;
+  }, [categoryRows]);
+
+  useEffect(() => {
+    if (!manageCategoriesOpen) {
+      manageCategoriesWasOpen.current = false;
+      return;
+    }
+    const seed = () =>
+      categories.map((c) => ({ id: c.id, name: c.name, display_order: c.display_order ?? 0 }));
+    if (!manageCategoriesWasOpen.current) {
+      manageCategoriesWasOpen.current = true;
+      setCategoryManageError('');
+      setCategoryRows(seed());
+      return;
+    }
+    setCategoryRows((prev) =>
+      prev.length === 0 && categories.length > 0 ? seed() : prev
+    );
+  }, [manageCategoriesOpen, categories]);
 
   const recipePreviewCost = useMemo(() => {
     if (!recipeOpen || !recipeProduct || recipeProduct.product_type !== 'made-to-order') return null;
@@ -185,7 +246,8 @@ export default function Menu() {
       setOpen(false);
       await refresh();
     } catch (e) {
-      setError(e?.response?.data?.error || 'Failed to save product');
+      const msg = e?.response?.data?.error;
+      setError(msg || (editing ? 'Failed to update product' : 'Failed to create product'));
     }
   };
 
@@ -193,12 +255,72 @@ export default function Menu() {
     try {
       setError('');
       await api.categories.create({ name: newCategoryName.trim() });
-      const res = await api.categories.list();
-      setCategories(res.data || []);
+      await reloadCategories();
       setCategoryOpen(false);
       setNewCategoryName('');
     } catch (e) {
       setError(e?.response?.data?.error || 'Failed to create category');
+    }
+  };
+
+  const saveCategoryRow = async (rowId) => {
+    const id = Number(rowId);
+    setCategoryManageError('');
+    setError('');
+    if (!Number.isFinite(id) || id <= 0) {
+      setCategoryManageError('Invalid category id.');
+      return;
+    }
+    const row = categoryRowsRef.current.find((r) => Number(r.id) === id);
+    if (!row) {
+      setCategoryManageError('Could not read this row. Close and reopen Edit categories, then try again.');
+      return;
+    }
+    const name = String(row.name || '').trim();
+    if (!name) {
+      setCategoryManageError('Category name cannot be empty.');
+      return;
+    }
+    const rawOrder = row.display_order;
+    const parsedOrder =
+      rawOrder === '' || rawOrder == null ? 0 : Number(rawOrder);
+    const display_order = Number.isFinite(parsedOrder) ? parsedOrder : 0;
+    try {
+      setCategorySavingId(id);
+      await api.categories.update(id, { name, display_order });
+      await reloadCategories();
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error ||
+        (e?.response?.status === 403 ? 'Manager access required to change categories.' : null) ||
+        e?.message ||
+        'Failed to update category';
+      setCategoryManageError(msg);
+    } finally {
+      setCategorySavingId(null);
+    }
+  };
+
+  const deleteCategoryRow = async (id) => {
+    const ok = window.confirm('Delete this category? Products must be moved or removed first.');
+    if (!ok) return;
+    try {
+      setCategoryManageError('');
+      setError('');
+      setCategorySavingId(Number(id));
+      await api.categories.remove(id);
+      await reloadCategories();
+      if (categoryFilterId != null && Number(categoryFilterId) === Number(id)) setCategoryFilterId(null);
+      setCategoryRows((prev) => prev.filter((r) => Number(r.id) !== Number(id)));
+    } catch (e) {
+      const msg =
+        e?.response?.data?.error ||
+        (e?.response?.status === 403 ? 'Manager access required to delete categories.' : null) ||
+        e?.message ||
+        'Failed to delete category';
+      setCategoryManageError(msg);
+    } finally {
+      setCategorySavingId(null);
     }
   };
 
@@ -217,10 +339,9 @@ export default function Menu() {
 
   const openRecipe = async (p) => {
     setRecipeProduct(p);
-    const firstVariantId = p.has_variants && (p.variants || []).length > 0 ? String(p.variants[0].id) : '';
-    setRecipeVariantId(firstVariantId);
+    setRecipeVariantId('');
     try {
-      const res = await api.products.getRecipe(p.id, { variant_id: firstVariantId || undefined });
+      const res = await api.products.getRecipe(p.id);
       const items = (res.data?.items || []).map((it) => ({
         ingredient_id: Number(it.ingredient_id),
         quantity: String(it.quantity)
@@ -230,6 +351,21 @@ export default function Menu() {
       setRecipeItems([{ ingredient_id: ingredients[0]?.id || '', quantity: '' }]);
     }
     setRecipeOpen(true);
+  };
+
+  const copyDefaultRecipeIntoForm = async () => {
+    if (!recipeProduct) return;
+    try {
+      setError('');
+      const res = await api.products.getRecipe(recipeProduct.id);
+      const items = (res.data?.items || []).map((it) => ({
+        ingredient_id: Number(it.ingredient_id),
+        quantity: String(it.quantity)
+      }));
+      setRecipeItems(items.length ? items : [{ ingredient_id: ingredients[0]?.id || '', quantity: '' }]);
+    } catch (e) {
+      setError(e?.response?.data?.error || 'Failed to load default recipe');
+    }
   };
 
   const saveRecipe = async () => {
@@ -351,7 +487,13 @@ export default function Menu() {
           <Button className="btn-secondary" onClick={openCreate}>
             + Add Product
           </Button>
-          <Button className="btn-secondary" onClick={() => setCategoryOpen(true)}>
+          <Button
+            className="btn-secondary"
+            onClick={() => {
+              setNewCategoryName('');
+              setCategoryOpen(true);
+            }}
+          >
             + Add Category
           </Button>
           <Button className="btn-secondary" onClick={() => navigate('/dashboard')}>
@@ -359,6 +501,9 @@ export default function Menu() {
           </Button>
           <Button className="btn-secondary" onClick={() => navigate('/pos')}>
             POS
+          </Button>
+          <Button className="btn-secondary" onClick={() => navigate('/orders')}>
+            Orders
           </Button>
           <Button
             className="btn-danger"
@@ -378,19 +523,86 @@ export default function Menu() {
           Refresh
         </Button>
       </div>
+
+      <div
+        className="card"
+        style={{
+          padding: 16,
+          marginBottom: 14,
+          border: '2px solid rgba(255, 182, 193, 0.55)',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.06)'
+        }}
+      >
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <span style={{ fontWeight: 800, fontSize: 17 }} className="pink-text">
+            Categories
+          </span>
+          <Button className="btn-secondary" onClick={() => setManageCategoriesOpen(true)}>
+            Edit categories
+          </Button>
+        </div>
+        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 10 }}>
+          Add a category from <strong>+ Add Category</strong> in the header. Tap a category to filter products, or <strong>All</strong> for
+          every group. The list below is organized by category.
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+          <button
+            type="button"
+            className={`btn ${categoryFilterId == null ? 'btn-primary' : 'btn-secondary'}`}
+            style={{ borderRadius: 999, padding: '8px 16px', fontWeight: 700 }}
+            onClick={() => setCategoryFilterId(null)}
+          >
+            All
+          </button>
+          {categories.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              className={`btn ${Number(categoryFilterId) === Number(c.id) ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ borderRadius: 999, padding: '8px 16px', fontWeight: 700 }}
+              onClick={() => setCategoryFilterId(c.id)}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error ? <div className="card error-text" style={{ marginBottom: 12 }}>{error}</div> : null}
 
       {loading ? (
         <div className="card">Loading products…</div>
+      ) : catalogSections.length === 0 ? (
+        <div className="card">{visible.length === 0 ? 'No products match your search.' : 'No products in this category.'}</div>
       ) : (
-        <ProductList
-          products={visible}
-          onEdit={openEdit}
-          onDeactivate={toggleActive}
-          onDelete={removeProduct}
-          onRecipe={openRecipe}
-          onVariants={openVariants}
-        />
+        catalogSections.map(({ category, products: prods }) => (
+          <div key={category.id} style={{ marginBottom: 28 }}>
+            <div
+              style={{
+                fontSize: 18,
+                fontWeight: 800,
+                marginBottom: 12,
+                paddingBottom: 8,
+                borderBottom: '2px solid #f1d6de',
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 10,
+                flexWrap: 'wrap'
+              }}
+            >
+              <span className="pink-text">{category.name}</span>
+              <span style={{ fontWeight: 600, opacity: 0.65, fontSize: 15 }}>{prods.length} product{prods.length === 1 ? '' : 's'}</span>
+            </div>
+            <ProductList
+              products={prods}
+              onEdit={openEdit}
+              onDeactivate={toggleActive}
+              onDelete={removeProduct}
+              onRecipe={openRecipe}
+              onVariants={openVariants}
+            />
+          </div>
+        ))
       )}
 
       <Modal open={open} title={editing ? `Edit Product: ${editing.name}` : 'Add Product'} onClose={() => setOpen(false)}>
@@ -557,17 +769,28 @@ export default function Menu() {
               </div>
             </div>
             {recipeProduct?.has_variants ? (
-              <select
-                className="input"
-                value={recipeVariantId}
-                onChange={(e) => onRecipeVariantChange(e.target.value)}
-              >
-                {(recipeProduct.variants || []).map((v) => (
-                  <option key={v.id} value={String(v.id)}>
-                    {v.variant_name} (₱{Number(v.price).toFixed(2)})
+              <>
+                <label style={{ fontSize: 12, fontWeight: 800, opacity: 0.85 }}>Recipe for</label>
+                <select
+                  className="input"
+                  value={recipeVariantId}
+                  onChange={(e) => onRecipeVariantChange(e.target.value)}
+                >
+                  <option value="">
+                    Default / Base (₱{Number(recipeProduct.base_price || 0).toFixed(2)}) — POS & stock fallback
                   </option>
-                ))}
-              </select>
+                  {(recipeProduct.variants || []).map((v) => (
+                    <option key={v.id} value={String(v.id)}>
+                      {v.variant_name} (₱{Number(v.price).toFixed(2)})
+                    </option>
+                  ))}
+                </select>
+                {recipeVariantId ? (
+                  <Button className="btn-secondary" type="button" onClick={() => copyDefaultRecipeIntoForm()}>
+                    Copy ingredients from default recipe
+                  </Button>
+                ) : null}
+              </>
             ) : null}
             {recipeItems.map((it, idx) => (
               <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr auto', gap: 8 }}>
@@ -780,6 +1003,81 @@ export default function Menu() {
               Save Category
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={manageCategoriesOpen}
+        title="Edit categories"
+        onClose={() => {
+          setCategoryManageError('');
+          setManageCategoriesOpen(false);
+        }}
+      >
+        <div style={{ display: 'grid', gap: 12 }}>
+          <div style={{ fontSize: 13, opacity: 0.88 }}>
+            Rename categories or change <strong>order</strong> (lower numbers appear first in POS filters and below). Empty categories
+            can be deleted; if products still use a category, deletion is blocked. You must be logged in as a <strong>manager</strong> to save
+            changes.
+          </div>
+          {categoryManageError ? (
+            <div className="card error-text" style={{ fontSize: 14 }}>
+              {categoryManageError}
+            </div>
+          ) : null}
+          {categoryRows.length === 0 ? (
+            <div style={{ opacity: 0.8 }}>No categories yet. Use <strong>+ Add Category</strong> in the header.</div>
+          ) : (
+            <div style={{ display: 'grid', gap: 10 }}>
+              {categoryRows.map((row, idx) => (
+                <div
+                  key={row.id}
+                  className="card"
+                  style={{ padding: 12, display: 'grid', gridTemplateColumns: '1.4fr 100px auto auto', gap: 10, alignItems: 'center' }}
+                >
+                  <Input
+                    placeholder="Name"
+                    value={row.name}
+                    onChange={(e) =>
+                      setCategoryRows((prev) =>
+                        prev.map((r, i) => (i === idx ? { ...r, name: e.target.value } : r))
+                      )
+                    }
+                  />
+                  <Input
+                    type="number"
+                    placeholder="Order"
+                    value={String(row.display_order ?? 0)}
+                    onChange={(e) =>
+                      setCategoryRows((prev) =>
+                        prev.map((r, i) => (i === idx ? { ...r, display_order: e.target.value } : r))
+                      )
+                    }
+                  />
+                  <Button
+                    className="btn-primary"
+                    onClick={() => saveCategoryRow(row.id)}
+                    disabled={categorySavingId != null}
+                  >
+                    {categorySavingId === Number(row.id) ? 'Saving…' : 'Save'}
+                  </Button>
+                  <Button className="btn-danger" onClick={() => deleteCategoryRow(row.id)} disabled={categorySavingId != null}>
+                    Delete
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+          <Button
+            className="btn-secondary"
+            style={{ width: '100%' }}
+            onClick={() => {
+              setCategoryManageError('');
+              setManageCategoriesOpen(false);
+            }}
+          >
+            Close
+          </Button>
         </div>
       </Modal>
     </div>

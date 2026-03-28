@@ -136,6 +136,10 @@ exports.getTopProducts = async (req, res) => {
     const [rows] = await connection.query(
       `SELECT
          p.name AS product_name,
+         CASE
+           WHEN oi.variant_id IS NULL THEN 'Base'
+           ELSE COALESCE(MAX(pv.variant_name), 'Variant')
+         END AS variant_label,
          SUM(oi.quantity) AS quantity_sold,
          SUM(oi.subtotal) AS revenue,
          COALESCE(SUM(oi.cost_subtotal), 0) AS total_cost,
@@ -143,8 +147,9 @@ exports.getTopProducts = async (req, res) => {
        FROM orders o
        JOIN order_items oi ON oi.order_id = o.id
        JOIN products p ON p.id = oi.product_id
+       LEFT JOIN product_variants pv ON pv.id = oi.variant_id AND pv.product_id = oi.product_id
        WHERE ${whereClause} AND o.status = 'completed'
-       GROUP BY p.id, p.name
+       GROUP BY p.id, p.name, oi.variant_id
        ORDER BY revenue DESC
        LIMIT ?`,
       params

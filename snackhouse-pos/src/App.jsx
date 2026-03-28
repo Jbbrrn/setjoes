@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Inventory from './pages/Inventory';
 import Menu from './pages/Menu';
 import Users from './pages/Users';
+import OrderHistory from './pages/OrderHistory';
 
 const RequireAuth = ({ children, roles }) => {
   const { employee, loading } = useAuth();
@@ -24,6 +25,14 @@ const AppRoutes = () => (
       element={
         <RequireAuth roles={['cashier', 'manager']}>
           <POS />
+        </RequireAuth>
+      }
+    />
+    <Route
+      path="/orders"
+      element={
+        <RequireAuth roles={['cashier', 'manager']}>
+          <OrderHistory />
         </RequireAuth>
       }
     />

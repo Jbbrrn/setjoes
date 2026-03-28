@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
-    "build:pos": "node scripts/build-pos.js"
+    "build:pos": "node scripts/build-pos.js",
+    "migrate:product-cost": "node scripts/migrate-product-cost-drop-srp.js",
+    "migrate:order-items-cost": "node scripts/migrate-order-items-cost.js",
+    "migrate:image-url": "node scripts/migrate-image-url-mediumtext.js"
   },
   "dependencies": {
     "bcrypt": "^5.1.1",

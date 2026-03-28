@@ -22,7 +22,8 @@ export default function POS() {
   const subtotal = useMemo(() => sumOrderSubtotal(orderLines), [orderLines]);
 
   const [variantProduct, setVariantProduct] = useState(null);
-  const [selectedVariantId, setSelectedVariantId] = useState(null);
+  /** 'base' = sell at product.base_price with variant_id null; otherwise product_variants.id */
+  const [selectedVariantKey, setSelectedVariantKey] = useState('base');
 
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [receipt, setReceipt] = useState(null);
@@ -92,7 +93,7 @@ export default function POS() {
       product.product_type !== 'finished-goods' && product.has_variants && (product.variants || []).length > 0;
     if (useVariants) {
       setVariantProduct(product);
-      setSelectedVariantId(product.variants[0]?.id || null);
+      setSelectedVariantKey('base');
       return;
     }
     addLine({ product, variant: null });
@@ -142,14 +143,14 @@ export default function POS() {
           <div style={{ fontWeight: 700 }}>
             Employee: <span className="pink-text">{employee?.full_name || '—'}</span>
           </div>
-          <Button
-            className="btn-secondary"
-            onClick={() => {
-              if (employee?.role === 'manager') navigate('/dashboard');
-            }}
-          >
-            Dashboard
+          <Button className="btn-secondary" onClick={() => navigate('/orders')}>
+            Orders
           </Button>
+          {employee?.role === 'manager' ? (
+            <Button className="btn-secondary" onClick={() => navigate('/dashboard')}>
+              Dashboard
+            </Button>
+          ) : null}
           <Button
             className="btn-danger"
             onClick={() => {
@@ -215,33 +216,50 @@ export default function POS() {
         title={variantProduct ? `Select Variant: ${variantProduct.name}` : ''}
         onClose={() => setVariantProduct(null)}
       >
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-          {(variantProduct?.variants || []).map((v) => (
-            <Button
-              key={v.id}
-              className={selectedVariantId === v.id ? 'btn-primary' : 'btn-secondary'}
-              onClick={() => setSelectedVariantId(v.id)}
-            >
-              {v.variant_name} (₱{Number(v.price).toFixed(2)})
-            </Button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
-          <Button className="btn-secondary" onClick={() => setVariantProduct(null)} style={{ flex: 1 }}>
-            Cancel
-          </Button>
-          <Button
-            className="btn-primary"
-            onClick={() => {
-              const v = (variantProduct.variants || []).find((x) => x.id === selectedVariantId) || null;
-              addLine({ product: variantProduct, variant: v });
-              setVariantProduct(null);
-            }}
-            style={{ flex: 1 }}
-          >
-            Add to Order
-          </Button>
-        </div>
+        {/* Children are evaluated even when Modal returns null — guard so we never read variantProduct when null. */}
+        {variantProduct ? (
+          <>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              <Button
+                key="base"
+                className={selectedVariantKey === 'base' ? 'btn-primary' : 'btn-secondary'}
+                onClick={() => setSelectedVariantKey('base')}
+              >
+                Base (₱{Number(variantProduct.base_price).toFixed(2)})
+              </Button>
+              {(variantProduct.variants || []).map((v) => (
+                <Button
+                  key={v.id}
+                  className={selectedVariantKey === v.id ? 'btn-primary' : 'btn-secondary'}
+                  onClick={() => setSelectedVariantKey(v.id)}
+                >
+                  {v.variant_name} (₱{Number(v.price).toFixed(2)})
+                </Button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 14 }}>
+              <Button className="btn-secondary" onClick={() => setVariantProduct(null)} style={{ flex: 1 }}>
+                Cancel
+              </Button>
+              <Button
+                className="btn-primary"
+                onClick={() => {
+                  if (selectedVariantKey === 'base') {
+                    addLine({ product: variantProduct, variant: null });
+                  } else {
+                    const v =
+                      (variantProduct.variants || []).find((x) => x.id === selectedVariantKey) || null;
+                    addLine({ product: variantProduct, variant: v });
+                  }
+                  setVariantProduct(null);
+                }}
+                style={{ flex: 1 }}
+              >
+                Add to Order
+              </Button>
+            </div>
+          </>
+        ) : null}
       </Modal>
 
       <PaymentModal

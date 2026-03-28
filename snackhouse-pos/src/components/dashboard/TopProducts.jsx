@@ -11,7 +11,7 @@ export default function TopProducts({ items }) {
         <div style={{ display: 'grid', gap: 8 }}>
           {items.map((it, idx) => (
             <div
-              key={it.product_name + idx}
+              key={`${it.product_name}-${it.variant_label ?? 'x'}-${idx}`}
               style={{
                 display: 'grid',
                 gridTemplateColumns: '1fr auto',
@@ -25,6 +25,9 @@ export default function TopProducts({ items }) {
               <div>
                 <div style={{ fontWeight: 800 }}>
                   {idx + 1}. {it.product_name}
+                  {it.variant_label != null && it.variant_label !== '' ? (
+                    <span style={{ fontWeight: 700 }}> — {it.variant_label}</span>
+                  ) : null}
                 </div>
                 <div style={{ opacity: 0.85, marginTop: 2 }}>{it.quantity_sold} sold</div>
                 <div style={{ opacity: 0.8, marginTop: 4, fontSize: 12 }}>

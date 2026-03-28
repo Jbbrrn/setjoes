@@ -53,7 +53,22 @@ export default function ProductList({ products, onEdit, onDeactivate, onDelete, 
                 <div style={{ opacity: 0.8, marginTop: 4 }}>
                   Variants:{' '}
                   {p.has_variants
-                    ? (p.variants || []).map((v) => `${v.variant_name} (₱${Number(v.price).toFixed(2)})`).join(', ') || '—'
+                    ? (p.variants || [])
+                        .map((v) => {
+                          const price = `₱${Number(v.price).toFixed(2)}`;
+                          let cost = '';
+                          if (v.unit_cost != null && v.unit_cost !== '') {
+                            cost = ` — Cost: ₱${Number(v.unit_cost).toFixed(2)}`;
+                          } else if (
+                            p.product_type === 'made-to-order' &&
+                            p.cost_price != null &&
+                            p.cost_price !== ''
+                          ) {
+                            cost = ` — Cost: ₱${Number(p.cost_price).toFixed(2)} (base recipe)`;
+                          }
+                          return `${v.variant_name} (${price})${cost}`;
+                        })
+                        .join(' · ') || '—'
                     : 'None'}
                 </div>
               ) : p.has_variants ? (

@@ -92,6 +92,9 @@ export default function Dashboard() {
           <Button className="btn-secondary" onClick={() => navigate('/pos')}>
             POS
           </Button>
+          <Button className="btn-secondary" onClick={() => navigate('/orders')}>
+            Orders
+          </Button>
           <Button className="btn-secondary" onClick={() => navigate('/inventory')}>
             Inventory
           </Button>

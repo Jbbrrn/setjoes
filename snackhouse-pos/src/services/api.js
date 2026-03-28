@@ -48,7 +48,8 @@ export const products = {
 
 export const orders = {
   create: (orderData) => api.post('/orders', orderData),
-  voidOrder: (id) => api.post(`/orders/${id}/void`)
+  voidOrder: (id) => api.post(`/orders/${id}/void`),
+  listHistory: (params) => api.get('/orders/history', { params })
 };
 
 export const inventory = {
@@ -75,7 +76,9 @@ export const reports = {
 
 export const categories = {
   list: () => api.get('/categories'),
-  create: (data) => api.post('/categories', data)
+  create: (data) => api.post('/categories', data),
+  update: (id, data) => api.put(`/categories/${id}`, data),
+  remove: (id) => api.delete(`/categories/${id}`)
 };
 
 export const users = {

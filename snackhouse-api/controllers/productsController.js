@@ -3,7 +3,8 @@ const {
   roundMoney,
   sumRecipeCost,
   getMadeToOrderCostDefaultRecipe,
-  syncMadeToOrderCostPriceCache
+  syncMadeToOrderCostPriceCache,
+  getUnitCostForSaleLine
 } = require('../utils/productCost');
 
 const ensureFinishedGoodsInventory = async (connection, productId) => {
@@ -51,6 +52,19 @@ exports.getProducts = async (req, res) => {
         });
       }
     }
+
+    const attachVariantUnitCosts = async (productRow, variantList) => {
+      if (!variantList || !variantList.length) return;
+      for (const v of variantList) {
+        const uc = await getUnitCostForSaleLine(connection, {
+          product_id: productRow.id,
+          product_type: productRow.product_type,
+          variant_id: v.id,
+          cost_price: productRow.cost_price
+        });
+        v.unit_cost = uc;
+      }
+    };
 
     // Compute current_stock:
     // - finished-goods: inventory.quantity
@@ -113,6 +127,9 @@ exports.getProducts = async (req, res) => {
         cost_price = await getMadeToOrderCostDefaultRecipe(connection, r.id);
       }
 
+      const variantList = variantsByProduct.get(r.id) || [];
+      await attachVariantUnitCosts({ ...r, cost_price }, variantList);
+
       products.push({
       id: r.id,
       name: r.name,
@@ -126,7 +143,7 @@ exports.getProducts = async (req, res) => {
       image_url: r.image_url,
       current_stock,
       reorder_level,
-      variants: variantsByProduct.get(r.id) || []
+      variants: variantList
     });
     }
 
