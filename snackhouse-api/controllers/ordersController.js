@@ -40,6 +40,12 @@ const validateOrderPayload = (body) => {
   const amount_paid = body.amount_paid;
   if (typeof amount_paid !== 'number' || amount_paid < 0) return 'Invalid amount_paid';
 
+  const order_type = body.order_type;
+  if (order_type !== undefined && order_type !== null) {
+    const allowed = ['dine-in', 'takeout'];
+    if (!allowed.includes(order_type)) return 'Invalid order_type';
+  }
+
   return null;
 };
 
@@ -237,6 +243,7 @@ exports.createOrder = async (req, res) => {
       subtotal,
       vat_amount,
       total_amount,
+      order_type: order_type || 'takeout',
       payment: { payment_method, amount_paid, change_given }
     });
   } catch (err) {
@@ -287,7 +294,7 @@ exports.listOrders = async (req, res) => {
     let params;
     if (isManager) {
       sql = `
-        SELECT o.id, o.order_number, o.created_at, o.total_amount, o.status, o.subtotal,
+        SELECT o.id, o.order_number, o.created_at, o.total_amount, o.status, o.subtotal, o.order_type,
                e.full_name AS cashier_name,
                p.payment_method, p.amount_paid, p.change_given
         FROM orders o
@@ -300,7 +307,7 @@ exports.listOrders = async (req, res) => {
       params = [startDate, endDate, paymentFilter, paymentFilter];
     } else {
       sql = `
-        SELECT o.id, o.order_number, o.created_at, o.total_amount, o.status, o.subtotal,
+        SELECT o.id, o.order_number, o.created_at, o.total_amount, o.status, o.subtotal, o.order_type,
                e.full_name AS cashier_name,
                p.payment_method, p.amount_paid, p.change_given
         FROM orders o
@@ -336,6 +343,7 @@ exports.listOrders = async (req, res) => {
         subtotal: Number(r.subtotal),
         status: r.status,
         cashier_name: r.cashier_name,
+        order_type: r.order_type || 'takeout',
         payment_method: r.payment_method,
         amount_paid: r.amount_paid != null ? Number(r.amount_paid) : null,
         change_given: r.change_given != null ? Number(r.change_given) : null

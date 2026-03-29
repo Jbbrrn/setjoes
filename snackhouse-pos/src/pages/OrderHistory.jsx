@@ -190,18 +190,31 @@ export default function OrderHistory() {
                 }}
               >
                 <div>
-                  <div style={{ fontWeight: 900 }}>
-                    {o.order_number}{' '}
+                  <div style={{ fontWeight: 900, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span>{o.order_number}</span>
                     <span
                       style={{
                         fontSize: 11,
                         padding: '2px 8px',
                         borderRadius: 999,
                         background: o.status === 'completed' ? '#48BB78' : '#A0AEC0',
-                        color: 'white'
+                        color: 'white',
+                        textTransform: 'uppercase'
                       }}
                     >
                       {o.status}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 999,
+                        background: (o.order_type || 'takeout') === 'dine-in' ? '#3182CE' : '#ED8936',
+                        color: 'white',
+                        textTransform: 'uppercase'
+                      }}
+                    >
+                      {o.order_type || 'takeout'}
                     </span>
                   </div>
                   <div style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>

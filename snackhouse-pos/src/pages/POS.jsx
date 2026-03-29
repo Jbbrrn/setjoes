@@ -19,6 +19,7 @@ export default function POS() {
   const [loading, setLoading] = useState(true);
 
   const [orderLines, setOrderLines] = useState([]);
+  const [orderType, setOrderType] = useState('takeout');
   const subtotal = useMemo(() => sumOrderSubtotal(orderLines), [orderLines]);
 
   const [variantProduct, setVariantProduct] = useState(null);
@@ -122,7 +123,8 @@ export default function POS() {
           quantity: l.quantity
         })),
         payment_method,
-        amount_paid
+        amount_paid,
+        order_type: orderType
       };
 
       const res = await api.orders.create(payload);
@@ -182,6 +184,22 @@ export default function POS() {
         </div>
 
         <div className="card" style={{ height: 'calc(100vh - 110px)' }}>
+          <div style={{ marginBottom: 10, display: 'flex', gap: 8 }}>
+            <Button
+              className={orderType === 'dine-in' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setOrderType('dine-in')}
+              style={{ flex: 1 }}
+            >
+              Dine-In
+            </Button>
+            <Button
+              className={orderType === 'takeout' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => setOrderType('takeout')}
+              style={{ flex: 1 }}
+            >
+              Takeout
+            </Button>
+          </div>
           <OrderSummary
             lines={orderLines}
             onInc={inc}

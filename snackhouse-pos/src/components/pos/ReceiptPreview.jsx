@@ -21,6 +21,7 @@ export default function ReceiptPreview({ open, receipt, onNewOrder, onPrint, onC
           <div>Date: {new Date(receipt.created_at).toLocaleString()}</div>
           <div>Order: {receipt.order_number}</div>
           <div>Cashier: {receipt.cashier_name || '—'}</div>
+          <div>Type: {(receipt.order_type || 'takeout').toUpperCase()}</div>
         </div>
 
         <div style={{ borderTop: '1px solid #E2E8F0', paddingTop: 10, marginTop: 10 }}>
